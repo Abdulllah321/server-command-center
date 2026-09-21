@@ -1,8 +1,11 @@
 import React from 'react';
 import { Search, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useUIStore } from '@/stores/use-ui-store';
 
 export const TopBar = () => {
+  const { setServerModalOpen } = useUIStore();
+
   return (
     <header className="h-14 border-b border-border bg-card/50 backdrop-blur-sm flex items-center justify-between px-6 shrink-0">
       <div className="flex-1 flex items-center">
@@ -17,7 +20,7 @@ export const TopBar = () => {
       </div>
       
       <div className="flex items-center gap-4">
-        <Button size="sm" className="gap-2">
+        <Button size="sm" className="gap-2" onClick={() => setServerModalOpen(true)}>
           <Plus className="h-4 w-4" />
           New Server
         </Button>

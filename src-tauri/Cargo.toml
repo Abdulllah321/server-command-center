@@ -28,8 +28,18 @@ tauri-plugin-log = "2"
 # Choosing rusqlite over sqlx because it natively compiles synchronously without async DB pools, and bundled makes deployment easy for Tauri.
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 russh = "0.44"
+russh-keys = "0.44"
 russh-sftp = "2.0"
 keyring = "3.0"
 tokio = { version = "1.37", features = ["full"] }
 aes-gcm = "0.10"
 uuid = { version = "1.8", features = ["v4"] }
+thiserror = "1.0"
+argon2 = "0.5"
+zeroize = { version = "1.7", features = ["derive"] }
+rand = "0.8"
+base64 = "0.22"
+async-trait = "0.1"
+
+[dev-dependencies]
+tempfile = "3.10"

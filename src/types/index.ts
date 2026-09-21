@@ -2,6 +2,18 @@ export type Environment = 'production' | 'staging' | 'dev';
 export type ServerStatus = 'online' | 'degraded' | 'offline' | 'unknown';
 export type AuthMethod = 'password' | 'private_key' | 'ssh_agent' | 'password_key';
 
+export interface CredentialMetadata {
+  id: string;
+  server_id: string;
+  auth_method: AuthMethod;
+  key_fingerprint?: string;
+  created_at: string;
+}
+
+export interface CredentialMetadataExtended extends CredentialMetadata {
+  server_name: string;
+}
+
 export interface Server {
   id: string;
   name: string;

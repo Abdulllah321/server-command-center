@@ -60,5 +60,42 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         info!("First run complete. Created tables: {:?}", table_names);
     }
     
+    // Enable foreign keys for ON DELETE CASCADE
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+    
     Ok(())
+}
+
+pub struct ActivityEntry {
+    pub server_id: Option<String>,
+    pub action: String,
+    pub target: Option<String>,
+    pub status: String,
+    pub detail: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
+pub fn log_activity(conn: &Connection, entry: ActivityEntry) {
+    let id = uuid::Uuid::new_v4().to_string();
+    // In a real app we might get the actor from state/auth context
+    let actor = "local_user";
+    
+    let res = conn.execute(
+        "INSERT INTO activity_log (id, server_id, actor, action, target, status, detail, duration_ms, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
+        rusqlite::params![
+            id,
+            entry.server_id,
+            actor,
+            entry.action,
+            entry.target,
+            entry.status,
+            entry.detail,
+            entry.duration_ms
+        ],
+    );
+    
+    if let Err(e) = res {
+        log::error!("Failed to write to activity_log: {}", e);
+    }
 }

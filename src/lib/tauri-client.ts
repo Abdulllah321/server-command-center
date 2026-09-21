@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile } from '../types';
+import type { Server, AuthMethod, RebuildProfile, CreateCredentialPayload, CredentialMetadataExtended } from '../types';
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -10,8 +10,8 @@ export const getServer = async (id: string): Promise<Server> => {
   return await invoke('get_server', { id });
 };
 
-export const addServer = async (server: Omit<Server, 'id' | 'created_at' | 'updated_at'>): Promise<Server> => {
-  return await invoke('add_server', { server });
+export const createServer = async (server: Omit<Server, 'id' | 'status' | 'last_checked_at' | 'created_at' | 'updated_at'>): Promise<Server> => {
+  return await invoke('create_server', { server });
 };
 
 export const updateServer = async (id: string, updates: Partial<Server>): Promise<Server> => {
@@ -22,8 +22,20 @@ export const deleteServer = async (id: string): Promise<void> => {
   return await invoke('delete_server', { id });
 };
 
-export const testConnection = async (serverId: string, authMethod: AuthMethod, keychainRef?: string): Promise<{ success: boolean; error?: string }> => {
-  return await invoke('test_connection', { serverId, authMethod, keychainRef });
+export const createCredential = async (payload: CreateCredentialPayload): Promise<any> => {
+  return await invoke('create_credential', { payload });
+};
+
+export const listCredentialsMetadata = async (): Promise<CredentialMetadataExtended[]> => {
+  return await invoke('list_credentials_metadata');
+};
+
+export const revealCredential = async (id: string, masterPasswordIfNeeded?: string): Promise<string> => {
+  return await invoke('reveal_credential', { id, masterPasswordIfNeeded });
+};
+
+export const testConnection = async (serverId: string, authMethod: AuthMethod, masterPasswordIfNeeded?: string): Promise<{ success: boolean; error?: string }> => {
+  return await invoke('test_connection', { serverId, authMethod, masterPasswordIfNeeded });
 };
 
 // Credentials Vault
