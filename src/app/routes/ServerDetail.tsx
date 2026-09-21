@@ -1,13 +1,17 @@
 import React from 'react';
 import { useParams } from 'react-router-dom';
+import { TerminalTabManager } from '@/features/terminal/components/TerminalTabManager';
 
 export const ServerDetail = () => {
   const { id } = useParams();
 
+  if (!id) return null;
+
   return (
-    <div className="flex-1 p-8">
-      <h1 className="text-3xl font-bold tracking-tight mb-4">Server Detail</h1>
-      <p className="text-muted-foreground">Details for server: {id} — coming in Phase 1</p>
+    <div className="flex h-full w-full bg-background overflow-hidden">
+      <div className="flex-1 min-w-0">
+        <TerminalTabManager serverId={id} />
+      </div>
     </div>
   );
 };

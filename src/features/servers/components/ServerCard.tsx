@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { Server } from '@/types';
-import { Server as ServerIcon, Activity, Cpu, HardDrive, MoreVertical, Trash, Edit } from 'lucide-react';
+import { Server as ServerIcon, Activity, Cpu, HardDrive, MoreVertical, Trash, Edit, TerminalSquare, Terminal as TerminalIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { deleteServer } from '@/lib/tauri-client';
 import { Loader2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 
 interface ServerCardProps {
   server: Server;
@@ -102,6 +103,45 @@ export const ServerCard = ({ server }: ServerCardProps) => {
             </div>
           )}
         </CardContent>
+        <div className="px-6 pb-6 pt-2 flex items-center gap-3">
+          <Button 
+            className="w-full" 
+            variant="default"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/server/${server.id}`);
+            }}
+          >
+            <TerminalSquare className="mr-2 h-4 w-4" />
+            Terminal
+          </Button>
+          <Button 
+            className="w-full bg-secondary text-secondary-foreground hover:bg-secondary/80" 
+            variant="secondary"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                // Determine terminal preference (mocking to "windows_terminal" for now, or read from settings later)
+                const preference = localStorage.getItem('terminal_preference') || 'windows_terminal';
+                
+                if (preference === 'integrated') {
+                  navigate(`/server/${server.id}`);
+                } else {
+                  await invoke('open_external_ssh', {
+                    serverId: server.id,
+                    terminalPreference: preference,
+                    masterPasswordIfNeeded: null // If a password is required, they'd ideally be prompted, but for now we pass null
+                  });
+                }
+              } catch (err) {
+                console.error("Failed to open external SSH", err);
+              }
+            }}
+          >
+            <TerminalIcon className="mr-2 h-4 w-4" />
+            SSH
+          </Button>
+        </div>
       </Card>
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>

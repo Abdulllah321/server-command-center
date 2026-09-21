@@ -6,35 +6,32 @@ use tokio::time::timeout;
 use crate::error::CommandError;
 use zeroize::Zeroize;
 
-struct DummyClient {}
-
-#[async_trait::async_trait]
-impl Handler for DummyClient {
-    type Error = russh::Error;
-    
-    async fn check_server_key(
-        &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
-    ) -> Result<bool, Self::Error> {
-        // TODO: Phase 2 Task 16 - Implement TOFU and known_hosts pinning.
-        // For this one-shot test, we blindly accept the key.
-        Ok(true)
-    }
-}
+use crate::ssh::client::SshClientHandler;
 
 pub async fn test_connection(
+    server_id: String,
     hostname: &str,
     port: u16,
     username: &str,
     auth_method: &str,
     mut secret: String,
+    app_handle: tauri::AppHandle,
+    db: Arc<std::sync::Mutex<rusqlite::Connection>>,
+    pending_verifications: Arc<tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
 ) -> Result<(), CommandError> {
     let config = Config::default();
     let config = Arc::new(config);
+    let handler = SshClientHandler {
+        server_id,
+        app_handle,
+        db,
+        pending_verifications,
+    };
+
     let mut session = russh::client::connect(
         config,
         (hostname, port),
-        DummyClient {},
+        handler,
     )
     .await
     .map_err(|_| CommandError::Internal("Failed to connect to host (connection refused or unreachable)".into()))?;

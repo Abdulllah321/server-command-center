@@ -54,7 +54,21 @@ pub async fn test_connection(
     };
 
     // 3. Execute SSH connection
-    let res = ssh_test_connection(&hostname, ssh_port, &username, &auth_method, secret).await;
+    let db_arc = std::sync::Arc::new(std::sync::Mutex::new(crate::db::init_db(
+        &app_handle.path().app_data_dir().unwrap().join("command_center.sqlite")
+    ).unwrap()));
+
+    let res = ssh_test_connection(
+        server_id.clone(),
+        &hostname,
+        ssh_port,
+        &username,
+        &auth_method,
+        secret,
+        app_handle.clone(),
+        db_arc,
+        state.session_manager.pending_verifications.clone(),
+    ).await;
 
     // 4. Audit Log
     let status = if res.is_ok() { "success" } else { "failed" };
@@ -72,3 +86,18 @@ pub async fn test_connection(
 
     res
 }
+
+#[tauri::command]
+pub async fn resolve_host_key_verification(
+    state: tauri::State<'_, AppState>,
+    server_id: String,
+    accepted: bool,
+) -> CommandResult<()> {
+    let mut pending = state.session_manager.pending_verifications.lock().await;
+    if let Some(tx) = pending.remove(&server_id) {
+        let _ = tx.send(accepted);
+    }
+    Ok(())
+}
+
+
