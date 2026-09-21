@@ -3,3 +3,8 @@ pub mod credentials;
 pub mod ssh;
 pub mod terminal;
 pub mod external_ssh;
+pub mod health;
+pub mod applications;
+pub mod pm2;
+pub mod logs;
+pub mod rebuild;

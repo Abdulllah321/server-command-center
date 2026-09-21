@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, CreateCredentialPayload, CredentialMetadataExtended } from '../types';
+import type { Server, AuthMethod, RebuildProfile, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions } from '../types';
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -48,22 +48,93 @@ export const setupVault = async (password: string): Promise<void> => {
 };
 
 // PM2 & Applications
-export const getPm2Processes = async (serverId: string): Promise<any[]> => {
-  return await invoke('get_pm2_processes', { serverId });
+export interface Pm2Process {
+  pm_id: number;
+  name: string;
+  status: string;
+  cpu: number;
+  memory: number;
+  restarts: number;
+  uptime: number; // in seconds
+  script_path: string;
+  pm_cwd?: string;
+  pm_err_log_path?: string;
+  env?: any;
+}
+
+export const listPm2Processes = async (serverId: string): Promise<Pm2Process[]> => {
+  return await invoke('list_processes', { serverId });
 };
 
-export const actionPm2Process = async (serverId: string, processName: string, action: 'start' | 'stop' | 'restart' | 'reload' | 'delete'): Promise<void> => {
-  return await invoke('action_pm2_process', { serverId, processName, action });
+export const startPm2Process = async (serverId: string, processId: string): Promise<void> => {
+  return await invoke('start_process', { serverId, processId });
 };
 
-// Rebuild & Deploy
-export const listRebuildProfiles = async (): Promise<RebuildProfile[]> => {
-  return await invoke('list_rebuild_profiles');
+export const stopPm2Process = async (serverId: string, processId: string): Promise<void> => {
+  return await invoke('stop_process', { serverId, processId });
 };
 
-export const triggerRebuild = async (applicationId: string, profileId: string): Promise<string> => {
+export const restartPm2Process = async (serverId: string, processId: string): Promise<void> => {
+  return await invoke('restart_process', { serverId, processId });
+};
+
+export const reloadPm2Process = async (serverId: string, processId: string): Promise<void> => {
+  return await invoke('reload_process', { serverId, processId });
+};
+
+export const deletePm2Process = async (serverId: string, processId: string, confirmationToken: string): Promise<void> => {
+  return await invoke('delete_process', { serverId, processId, confirmationToken });
+};
+
+export const savePm2Processes = async (serverId: string): Promise<void> => {
+  return await invoke('save_processes', { serverId });
+};
+
+export const tailProcessLog = async (serverId: string, logPath: string, lines: number): Promise<string> => {
+  return await invoke('tail_process_log', { serverId, logPath, lines });
+};
+
+// Applications
+export const listApplications = async (serverId: string): Promise<Application[]> => {
+  return await invoke('list_applications', { serverId });
+};
+
+export const createApplication = async (opts: CreateApplicationOptions): Promise<Application> => {
+  return await invoke('create_application', { opts });
+};
+
+export const deleteApplication = async (id: string): Promise<void> => {
+  return await invoke('delete_application', { id });
+};
+
+// Rebuild Profiles
+export const listProfiles = async (): Promise<RebuildProfile[]> => {
+  return await invoke('list_profiles');
+};
+
+export const getProfile = async (id: string): Promise<RebuildProfile> => {
+  return await invoke('get_profile', { id });
+};
+
+export const createProfile = async (opts: { name: string, steps: any[] }): Promise<RebuildProfile> => {
+  return await invoke('create_profile', { opts });
+};
+
+export const updateProfile = async (id: string, opts: { name: string, steps: any[] }): Promise<RebuildProfile> => {
+  return await invoke('update_profile', { id, opts });
+};
+
+export const deleteProfile = async (id: string): Promise<void> => {
+  return await invoke('delete_profile', { id });
+};
+
+export const triggerRebuild = async (applicationId: string, profileId: string, retryFromStep?: number): Promise<string> => {
   // Returns a deployment/pipeline ID
-  return await invoke('trigger_rebuild', { applicationId, profileId });
+  return await invoke('trigger_rebuild', { applicationId, profileId, retryFromStep });
+};
+
+export const abortPipeline = async (pipelineId: string): Promise<void> => {
+  return await invoke('abort_pipeline', { pipelineId });
 };
 
 // Health
@@ -86,8 +157,20 @@ export const closeTerminalSession = async (sessionId: string): Promise<void> => 
 };
 
 // Logs
-export const openLogStream = async (applicationId: string): Promise<string> => {
-  return await invoke('open_log_stream', { applicationId });
+export const openLogStream = async (serverId: string, pm2Name: string): Promise<string> => {
+  return await invoke('open_log_stream', { serverId, pm2Name });
+};
+
+export const closeLogStream = async (sessionId: string): Promise<void> => {
+  return await invoke('close_log_stream', { sessionId });
+};
+
+export const getLogSessionFile = async (sessionId: string): Promise<string> => {
+  return await invoke('get_log_session_file', { sessionId });
+};
+
+export const readLogSessionFile = async (sessionId: string): Promise<string> => {
+  return await invoke('read_log_session_file', { sessionId });
 };
 
 // Confirmation Chokepoint

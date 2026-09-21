@@ -2,6 +2,14 @@ export type Environment = 'production' | 'staging' | 'dev';
 export type ServerStatus = 'online' | 'degraded' | 'offline' | 'unknown';
 export type AuthMethod = 'password' | 'private_key' | 'ssh_agent' | 'password_key';
 
+export interface CreateCredentialPayload {
+  name: string;
+  server_id: string;
+  auth_method: AuthMethod;
+  password?: string;
+  private_key?: string;
+}
+
 export interface CredentialMetadata {
   id: string;
   server_id: string;
@@ -50,6 +58,16 @@ export interface Credential {
   created_at: string;
 }
 
+export interface CreateApplicationOptions {
+  server_id: string;
+  name: string;
+  repo_path?: string;
+  pm2_name?: string;
+  branch: string;
+  package_mgr: string;
+  rebuild_profile_id?: string;
+}
+
 export interface Application {
   id: string;
   server_id: string;
@@ -62,10 +80,16 @@ export interface Application {
   created_at: string;
 }
 
+export interface RebuildStep {
+  label: string;
+  command: string;
+  continue_on_error: boolean;
+}
+
 export interface RebuildProfile {
   id: string;
   name: string;
-  steps_json: string; // Ordered JSON array of {label, command}
+  steps: RebuildStep[];
   is_builtin: boolean;
   created_at: string;
 }

@@ -25,12 +25,20 @@ pub fn run() {
             
             let db_path = app_dir.join("command_center.sqlite");
             let conn = db::init_db(&db_path).expect("failed to init database");
+            
+            // Seed builtin rebuild profiles
+            commands::rebuild::seed_builtin_profiles(&conn).expect("failed to seed builtin profiles");
+            
+            let db_arc = std::sync::Arc::new(std::sync::Mutex::new(conn));
+
+            // Start background ping loop for server statuses
+            commands::health::start_ping_loop(db_arc.clone());
 
             let session_manager = ssh::session_manager::SessionManager::new();
             let pty_manager = ssh::pty::PtyManager::new();
             
             app.manage(AppState { 
-                db: std::sync::Mutex::new(conn),
+                db: db_arc,
                 session_manager,
                 pty_manager,
             });
@@ -55,6 +63,29 @@ pub fn run() {
         commands::terminal::resize_terminal,
         commands::terminal::close_terminal,
         commands::external_ssh::open_external_ssh,
+        commands::health::get_health,
+        commands::pm2::list_processes,
+        commands::pm2::start_process,
+        commands::pm2::stop_process,
+        commands::pm2::restart_process,
+        commands::pm2::reload_process,
+        commands::pm2::delete_process,
+        commands::pm2::save_processes,
+        commands::pm2::tail_process_log,
+        commands::logs::open_log_stream,
+        commands::logs::close_log_stream,
+        commands::logs::get_log_session_file,
+        commands::logs::read_log_session_file,
+        commands::rebuild::list_profiles,
+        commands::rebuild::get_profile,
+        commands::rebuild::create_profile,
+        commands::rebuild::update_profile,
+        commands::rebuild::delete_profile,
+        commands::applications::list_applications,
+        commands::applications::create_application,
+        commands::applications::delete_application,
+        pipelines::rebuild_engine::trigger_rebuild,
+        pipelines::rebuild_engine::abort_pipeline,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

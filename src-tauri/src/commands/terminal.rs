@@ -23,10 +23,42 @@ pub async fn open_terminal(
         .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
         .await?;
         
-    let pty_id = state
+    let (pty_id, mut rx) = state
         .pty_manager
-        .open_pty(session_handle, cols, rows, app_handle)
+        .open_pty(session_handle, cols, rows, None)
         .await?;
+
+    let pty_id_clone = pty_id.clone();
+    let app_handle_clone = app_handle.clone();
+
+    tokio::spawn(async move {
+        let mut close_reason = "closed";
+        while let Some(msg) = rx.recv().await {
+            use russh::ChannelMsg;
+            use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+            use tauri::Emitter;
+
+            match msg {
+                ChannelMsg::Data { ref data } | ChannelMsg::ExtendedData { ref data, .. } => {
+                    let base64_str = BASE64.encode(data);
+                    let _ = app_handle_clone.emit(&format!("terminal://data:{}", pty_id_clone), crate::ssh::pty::TerminalDataEvent {
+                        pty_id: pty_id_clone.clone(),
+                        data_base64: base64_str,
+                    });
+                }
+                ChannelMsg::Eof | ChannelMsg::Close => {
+                    close_reason = "closed";
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        use tauri::Emitter;
+        let _ = app_handle_clone.emit(&format!("terminal://{}:{}", close_reason, pty_id_clone), crate::ssh::pty::TerminalStatusEvent {
+            pty_id: pty_id_clone.clone(),
+        });
+    });
 
     // Audit Log: only log the initiation of the terminal session
     let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;

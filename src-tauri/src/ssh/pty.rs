@@ -42,13 +42,18 @@ impl PtyManager {
         session: Handle<SshClientHandler>,
         cols: u32,
         rows: u32,
-        app_handle: AppHandle,
-    ) -> Result<String, CommandError> {
+        command: Option<&str>,
+    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<russh::ChannelMsg>), CommandError> {
         let mut session_clone = session.clone();
         let mut channel = session_clone.channel_open_session().await.map_err(|e| CommandError::Internal(format!("Failed to open channel: {}", e)))?;
         
         channel.request_pty(false, "xterm-256color", cols, rows, 0, 0, &[]).await.map_err(|_| CommandError::Internal("Failed to request PTY".into()))?;
-        channel.request_shell(true).await.map_err(|_| CommandError::Internal("Failed to request shell".into()))?;
+        
+        if let Some(cmd) = command {
+            channel.exec(true, cmd.as_bytes()).await.map_err(|_| CommandError::Internal("Failed to execute command".into()))?;
+        } else {
+            channel.request_shell(true).await.map_err(|_| CommandError::Internal("Failed to request shell".into()))?;
+        }
 
         let pty_id = Uuid::new_v4().to_string();
         let channel_id = channel.id();
@@ -62,52 +67,30 @@ impl PtyManager {
             });
         }
 
-        // Spawn read loop
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let pty_id_clone = pty_id.clone();
         let manager_clone = self.clone();
         
         tokio::spawn(async move {
-            let mut close_reason = "closed"; // "closed" for clean EOF, "disconnected" for abrupt disconnect
             while let Some(msg) = channel.wait().await {
-                match msg {
-                    russh::ChannelMsg::Data { ref data } => {
-                        let base64_str = BASE64.encode(data);
-                        let _ = app_handle.emit(&format!("terminal://data:{}", pty_id_clone), TerminalDataEvent {
-                            pty_id: pty_id_clone.clone(),
-                            data_base64: base64_str,
-                        });
-                    }
-                    russh::ChannelMsg::Eof => {
-                        close_reason = "closed";
-                        break;
-                    }
-                    russh::ChannelMsg::Close => {
-                        close_reason = "closed";
-                        break;
-                    }
-                    // Handle extended data (stderr) if necessary
-                    russh::ChannelMsg::ExtendedData { ref data, .. } => {
-                        let base64_str = BASE64.encode(data);
-                        let _ = app_handle.emit(&format!("terminal://data:{}", pty_id_clone), TerminalDataEvent {
-                            pty_id: pty_id_clone.clone(),
-                            data_base64: base64_str,
-                        });
-                    }
-                    _ => {}
+                // Determine if we should break early before forwarding
+                let is_end = matches!(msg, russh::ChannelMsg::Eof | russh::ChannelMsg::Close);
+                
+                if tx.send(msg).is_err() {
+                    break;
+                }
+
+                if is_end {
+                    break;
                 }
             }
 
             // Cleanup when loop breaks
             let mut ptys = manager_clone.ptys.lock().await;
             ptys.remove(&pty_id_clone);
-            
-            // Notify frontend
-            let _ = app_handle.emit(&format!("terminal://{}:{}", close_reason, pty_id_clone), TerminalStatusEvent {
-                pty_id: pty_id_clone.clone(),
-            });
         });
 
-        Ok(pty_id)
+        Ok((pty_id, rx))
     }
 
     pub async fn write(&self, pty_id: &str, data: &[u8]) -> Result<(), CommandError> {

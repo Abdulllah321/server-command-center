@@ -8,24 +8,44 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { HealthWidget } from '@/features/health/components/HealthWidget';
+import { usePm2Processes } from '@/features/pm2/api';
 import { deleteServer } from '@/lib/tauri-client';
 import { Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface ServerCardProps {
   server: Server;
+  onDeleted?: () => void;
 }
 
-export const ServerCard = ({ server }: ServerCardProps) => {
+export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const { data: pm2Processes, isLoading: isLoadingPm2 } = usePm2Processes(server.id, 60000); // 60s poll interval for Dashboard cards
+
+  const getPm2Badge = () => {
+    if (isLoadingPm2) return <Badge variant="outline" className="text-muted-foreground"><Loader2 className="h-3 w-3 mr-1 animate-spin" /> PM2</Badge>;
+    if (!pm2Processes) return <Badge variant="outline" className="text-muted-foreground">PM2 Error</Badge>;
+    if (pm2Processes.length === 0) return <Badge variant="outline" className="text-muted-foreground">0 Apps</Badge>;
+    
+    const online = pm2Processes.filter(p => p.status === 'online').length;
+    const total = pm2Processes.length;
+    
+    if (online === total) {
+      return <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">{online}/{total} Online</Badge>;
+    } else {
+      return <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">{online}/{total} Online</Badge>;
+    }
+  };
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteServer(server.id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['servers'] });
       setIsDeleteDialogOpen(false);
+      onDeleted?.();
     }
   });
 
@@ -50,7 +70,10 @@ export const ServerCard = ({ server }: ServerCardProps) => {
               <ServerIcon className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <CardTitle className="text-lg font-medium">{server.name}</CardTitle>
+              <div className="flex items-center space-x-2">
+                <CardTitle className="text-lg font-medium">{server.name}</CardTitle>
+                {getPm2Badge()}
+              </div>
               <div className="text-sm text-muted-foreground flex items-center mt-1">
                 <span className={`w-2 h-2 rounded-full mr-2 ${getStatusColor(server.status)}`} />
                 {server.hostname}
@@ -79,20 +102,7 @@ export const ServerCard = ({ server }: ServerCardProps) => {
 
         </CardHeader>
         <CardContent>
-          <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-            <div className="flex flex-col space-y-1">
-              <span className="text-muted-foreground flex items-center"><HardDrive className="h-3 w-3 mr-1"/> OS</span>
-              <span className="font-medium truncate">{server.os || 'Unknown'}</span>
-            </div>
-            <div className="flex flex-col space-y-1">
-              <span className="text-muted-foreground flex items-center"><Cpu className="h-3 w-3 mr-1"/> CPU</span>
-              <span className="font-medium">—</span>
-            </div>
-            <div className="flex flex-col space-y-1">
-              <span className="text-muted-foreground flex items-center"><Activity className="h-3 w-3 mr-1"/> PM2</span>
-              <span className="font-medium">—</span>
-            </div>
-          </div>
+          <HealthWidget serverId={server.id} variant="compact" pollInterval={30000} />
           {server.tags && server.tags.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {server.tags.map(tag => (
