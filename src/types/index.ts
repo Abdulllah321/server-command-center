@@ -3,11 +3,11 @@ export type ServerStatus = 'online' | 'degraded' | 'offline' | 'unknown';
 export type AuthMethod = 'password' | 'private_key' | 'ssh_agent' | 'password_key';
 
 export interface CreateCredentialPayload {
-  name: string;
   server_id: string;
   auth_method: AuthMethod;
-  password?: string;
-  private_key?: string;
+  secret_payload: string;
+  key_fingerprint?: string;
+  master_password?: string;
 }
 
 export interface CredentialMetadata {
@@ -36,6 +36,7 @@ export interface Server {
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
+  tags?: string[];
 }
 
 export interface ServerTag {
@@ -47,6 +48,16 @@ export interface ServerGroup {
   id: string;
   name: string;
   parent_id: string | null;
+}
+
+export interface ServerGroupTree extends ServerGroup {
+  children: ServerGroupTree[];
+  server_ids: string[];
+}
+
+export interface UpdateGroupPayload {
+  name?: string;
+  parent_id?: string | null;
 }
 
 export interface Credential {
@@ -177,3 +188,65 @@ export interface LogSession {
   ended_at: string | null;
   file_path: string | null;
 }
+
+export interface CreateBackupOptions {
+  target_type: 'postgres' | 'mysql' | 'redis' | 'directory' | 'custom';
+  target_name: string;
+  destination_dir?: string;
+  custom_command?: string;
+}
+
+export interface NginxSite {
+  name: string;
+  domains: string[];
+  proxy_pass: string | null;
+  ssl_enabled: boolean;
+  ssl_certificate: string | null;
+  is_enabled: boolean;
+  file_path: string;
+}
+
+export interface SslCertificate {
+  domain: string;
+  cert_name: string;
+  expiry_date: string | null;
+  days_remaining: number | null;
+  is_valid: boolean;
+}
+
+export interface AlertRule {
+  id: string;
+  server_id: string;
+  metric: 'cpu' | 'memory' | 'disk' | 'pm2_crash';
+  threshold: number;
+  operator: 'gt' | 'lt';
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface AlertHistoryEntry {
+  id: string;
+  server_id: string;
+  metric: string;
+  value: number;
+  message: string;
+  triggered_at: string;
+}
+
+export interface SaveAlertRuleOptions {
+  id?: string;
+  server_id: string;
+  metric: string;
+  threshold: number;
+  operator: string;
+  enabled: boolean;
+}
+
+export interface EvaluateAlertsPayload {
+  server_id: string;
+  cpu_percent: number;
+  memory_percent: number;
+  disk_percent: number;
+  errored_pm2_count: number;
+}
+

@@ -157,32 +157,32 @@ pub async fn create_profile(
     let steps_json = serde_json::to_string(&opts.steps)
         .map_err(|e| CommandError::Internal(format!("Failed to serialize steps: {}", e)))?;
         
+    let start = Instant::now();
     let id = Uuid::new_v4().to_string();
     
-    let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
+    {
+        let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
+        
+        let res = conn.execute(
+            "INSERT INTO rebuild_profiles (id, name, steps_json, is_builtin, created_at) VALUES (?1, ?2, ?3, 0, datetime('now'))",
+            rusqlite::params![id, opts.name, steps_json]
+        );
+        
+        let status = if res.is_ok() { "success" } else { "failed" };
+        let detail = res.as_ref().err().map(|e| e.to_string());
+        
+        log_activity(&conn, ActivityEntry {
+            server_id: None,
+            action: "create_rebuild_profile".into(),
+            target: Some(opts.name.clone()),
+            status: status.into(),
+            detail,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+        
+        res.map_err(|e| CommandError::Internal(e.to_string()))?;
+    }
     
-    let start = Instant::now();
-    let res = conn.execute(
-        "INSERT INTO rebuild_profiles (id, name, steps_json, is_builtin, created_at) VALUES (?1, ?2, ?3, 0, datetime('now'))",
-        rusqlite::params![id, opts.name, steps_json]
-    );
-    
-    let status = if res.is_ok() { "success" } else { "failed" };
-    let detail = res.as_ref().err().map(|e| e.to_string());
-    
-    log_activity(&conn, ActivityEntry {
-        server_id: None,
-        action: "create_rebuild_profile".into(),
-        target: Some(opts.name.clone()),
-        status: status.into(),
-        detail,
-        duration_ms: Some(start.elapsed().as_millis() as i64),
-    });
-    
-    res.map_err(|e| CommandError::Internal(e.to_string()))?;
-    
-    // Fetch the inserted record to return it with correct created_at
-    drop(conn);
     get_profile(state, id).await
 }
 
@@ -196,44 +196,45 @@ pub async fn update_profile(
         return Err(CommandError::InvalidInput("ID and Name cannot be empty".into()));
     }
 
-    let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
-    
-    // Check if it's builtin
-    let is_builtin: i32 = conn.query_row(
-        "SELECT is_builtin FROM rebuild_profiles WHERE id = ?1",
-        rusqlite::params![id],
-        |row| row.get(0)
-    ).optional().map_err(|e| CommandError::Internal(e.to_string()))?
-    .ok_or_else(|| CommandError::NotFound("Profile not found".into()))?;
-    
-    if is_builtin == 1 {
-        return Err(CommandError::Forbidden("Cannot modify built-in profiles".into()));
-    }
-    
     let steps_json = serde_json::to_string(&opts.steps)
         .map_err(|e| CommandError::Internal(format!("Failed to serialize steps: {}", e)))?;
 
     let start = Instant::now();
-    let res = conn.execute(
-        "UPDATE rebuild_profiles SET name = ?1, steps_json = ?2 WHERE id = ?3",
-        rusqlite::params![opts.name, steps_json, id]
-    );
+    {
+        let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
+        
+        // Check if it's builtin
+        let is_builtin: i32 = conn.query_row(
+            "SELECT is_builtin FROM rebuild_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0)
+        ).optional().map_err(|e| CommandError::Internal(e.to_string()))?
+        .ok_or_else(|| CommandError::NotFound("Profile not found".into()))?;
+        
+        if is_builtin == 1 {
+            return Err(CommandError::Forbidden("Cannot modify built-in profiles".into()));
+        }
+        
+        let res = conn.execute(
+            "UPDATE rebuild_profiles SET name = ?1, steps_json = ?2 WHERE id = ?3",
+            rusqlite::params![opts.name, steps_json, id]
+        );
 
-    let status = if res.is_ok() { "success" } else { "failed" };
-    let detail = res.as_ref().err().map(|e| e.to_string());
-    
-    log_activity(&conn, ActivityEntry {
-        server_id: None,
-        action: "update_rebuild_profile".into(),
-        target: Some(opts.name.clone()),
-        status: status.into(),
-        detail,
-        duration_ms: Some(start.elapsed().as_millis() as i64),
-    });
+        let status = if res.is_ok() { "success" } else { "failed" };
+        let detail = res.as_ref().err().map(|e| e.to_string());
+        
+        log_activity(&conn, ActivityEntry {
+            server_id: None,
+            action: "update_rebuild_profile".into(),
+            target: Some(opts.name.clone()),
+            status: status.into(),
+            detail,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
 
-    res.map_err(|e| CommandError::Internal(e.to_string()))?;
+        res.map_err(|e| CommandError::Internal(e.to_string()))?;
+    }
 
-    drop(conn);
     get_profile(state, id).await
 }
 

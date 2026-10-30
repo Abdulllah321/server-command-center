@@ -2,8 +2,11 @@ use crate::AppState;
 use crate::error::{CommandError, CommandResult};
 use crate::models::{CreateCredentialPayload, CredentialMetadata};
 use crate::secrets::{keychain, vault};
+use crate::db::{log_activity, ActivityEntry, actions};
 use uuid::Uuid;
 use zeroize::Zeroize;
+use std::time::Instant;
+use tauri::Manager;
 
 /// Creates a new credential, writing the raw payload to the appropriate backend,
 /// and the metadata to SQLite.
@@ -32,42 +35,51 @@ pub async fn create_credential(
             keychain::store_secret(&keychain_ref, &payload.secret_payload)?;
         }
         "private_key" | "password_key" => {
-            // Require the vault to be initialized/unlocked before adding keys.
-            // In a real application, the vault might be pre-unlocked and stored in State,
-            // or we request the master password here. For this implementation, we will assume 
-            // the user has a mechanism to provide it, but since the signature of create_credential
-            // doesn't include the master password, we either prompt it or assume it's empty.
-            // Wait, the spec for create_credential says: "routes to vault...". It implies the user 
-            // should either provide the master password, or the vault doesn't lock for creation?
-            // AES-GCM requires the key to encrypt. Let's assume the frontend passes the master_password
-            // if needed, or we just fail if we can't get it.
-            // Ah, the user didn't ask to add master_password to create_credential.
-            // Let's modify CreateCredentialPayload or just accept an optional master_password.
-            return Err(CommandError::Validation(
-                "Vault-based credentials require a master password, but signature lacks it. (Requires UX decision)".into()
-            ));
+            let password = payload.master_password
+                .as_deref()
+                .ok_or_else(|| CommandError::Validation("Master password required to unlock vault for saving credential".into()))?;
+            let app_dir = app_handle.path().app_data_dir().expect("App data dir not found");
+            let vault_handle = vault::unlock(password, &app_dir)?;
+            vault::store_entry(&vault_handle, &keychain_ref, &payload.secret_payload)?;
         }
         _ => return Err(CommandError::Validation("Unknown auth method".into())),
     }
 
     // Zeroize payload from memory proactively
     payload.secret_payload.zeroize();
+    if let Some(mut mp) = payload.master_password.take() {
+        mp.zeroize();
+    }
 
-    let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
+    let start = Instant::now();
+    {
+        let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
 
-    conn.execute(
-        "INSERT INTO credentials (id, server_id, auth_method, keychain_ref, key_fingerprint, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
-        rusqlite::params![
-            &id,
-            &payload.server_id,
-            &payload.auth_method,
-            &keychain_ref,
-            &payload.key_fingerprint,
-        ],
-    )?;
+        // Remove previous credentials for this server and auth method
+        let _ = conn.execute("DELETE FROM credentials WHERE server_id = ?1 AND auth_method = ?2", [&payload.server_id, &payload.auth_method]);
 
-    drop(conn);
+        let res = conn.execute(
+            "INSERT INTO credentials (id, server_id, auth_method, keychain_ref, key_fingerprint, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
+            rusqlite::params![
+                &id,
+                &payload.server_id,
+                &payload.auth_method,
+                &keychain_ref,
+                &payload.key_fingerprint,
+            ],
+        );
+        let status = if res.is_ok() { "success" } else { "failed" };
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(payload.server_id.clone()),
+            action: actions::CREATE_CREDENTIAL.into(),
+            target: Some(format!("{} ({})", payload.auth_method, keychain_ref)),
+            status: status.into(),
+            detail: res.as_ref().err().map(|e| e.to_string()),
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+        res?;
+    }
 
     get_credential_metadata(state, id).await
 }
@@ -177,6 +189,7 @@ pub async fn delete_credential(
     id: String,
     master_password_if_needed: Option<String>,
 ) -> CommandResult<()> {
+    let start = Instant::now();
     let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
 
     let (auth_method, keychain_ref): (String, String) = conn.query_row(
@@ -185,15 +198,29 @@ pub async fn delete_credential(
         |row| Ok((row.get(0)?, row.get(1)?)),
     ).map_err(|_| CommandError::NotFound("Credential not found".into()))?;
 
+    let server_id: Option<String> = conn.query_row(
+        "SELECT server_id FROM credentials WHERE id = ?1",
+        [&id],
+        |row| row.get(0),
+    ).ok();
+
     // Delete from DB first
-    conn.execute("DELETE FROM credentials WHERE id = ?1", [&id])?;
+    let del_res = conn.execute("DELETE FROM credentials WHERE id = ?1", [&id]);
+    let status = if del_res.is_ok() { "success" } else { "failed" };
+    log_activity(&conn, ActivityEntry {
+        server_id,
+        action: actions::DELETE_CREDENTIAL.into(),
+        target: Some(format!("{} ({})", auth_method, id)),
+        status: status.into(),
+        detail: del_res.as_ref().err().map(|e| e.to_string()),
+        duration_ms: Some(start.elapsed().as_millis() as i64),
+    });
+    del_res?;
     drop(conn);
 
     // Delete from storage backend
     match auth_method.as_str() {
         "password" | "ssh_agent" => {
-            // It's possible the keychain entry was already wiped externally,
-            // we ignore NotFound errors on delete.
             let _ = keychain::delete_secret(&keychain_ref);
         }
         "private_key" | "password_key" => {
@@ -210,9 +237,35 @@ pub async fn delete_credential(
     Ok(())
 }
 
+/// Validates master password and verifies/initializes the vault
+#[tauri::command]
+pub async fn unlock_vault(
+    app_handle: tauri::AppHandle,
+    mut password: String,
+) -> CommandResult<bool> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| CommandError::Internal(e.to_string()))?;
+    let res = vault::unlock(&password, &app_dir);
+    password.zeroize();
+    match res {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Initializes master password setup for the vault
+#[tauri::command]
+pub async fn setup_vault(
+    app_handle: tauri::AppHandle,
+    mut password: String,
+) -> CommandResult<()> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| CommandError::Internal(e.to_string()))?;
+    let res = vault::unlock(&password, &app_dir);
+    password.zeroize();
+    res.map(|_| ()).map_err(Into::into)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rusqlite::Connection;
 
     #[test]
@@ -238,7 +291,7 @@ mod tests {
         ).unwrap();
 
         // Verify the raw secret isn't in this table
-        let mut stmt = conn.prepare("SELECT * FROM credentials WHERE id = 'cred-1'").unwrap();
+        let stmt = conn.prepare("SELECT * FROM credentials WHERE id = 'cred-1'").unwrap();
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         assert!(!column_names.contains(&"secret".to_string()));
         assert!(!column_names.contains(&"payload".to_string()));

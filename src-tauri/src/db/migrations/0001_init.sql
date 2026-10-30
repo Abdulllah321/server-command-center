@@ -58,7 +58,7 @@ CREATE TABLE applications (
 
 CREATE TABLE rebuild_profiles (
   id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,           -- "Next.js + Bun"
+  name        TEXT NOT NULL UNIQUE,    -- "Next.js + Bun"
   steps_json  TEXT NOT NULL,           -- ordered JSON array of {label, command}
   is_builtin  INTEGER DEFAULT 0,
   created_at  TEXT NOT NULL

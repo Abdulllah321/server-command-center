@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::error::{CommandError, CommandResult};
-use crate::db::{log_activity, ActivityEntry};
+use crate::db::{log_activity, ActivityEntry, actions};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use russh::ChannelMsg;
@@ -67,7 +67,10 @@ async fn exec_ssh_command(
         let msg_future = channel.wait();
         let msg_opt = match timeout(timeout_duration, msg_future).await {
             Ok(opt) => opt,
-            Err(_) => return Err(CommandError::Internal("SSH command timed out".into())),
+            Err(_) => {
+                let _ = channel.close().await;
+                return Err(CommandError::Internal("SSH command timed out".into()));
+            }
         };
 
         match msg_opt {
@@ -81,6 +84,7 @@ async fn exec_ssh_command(
         }
     }
     
+    let _ = channel.close().await;
     Ok(output)
 }
 
@@ -90,16 +94,32 @@ pub async fn list_processes(
     app_handle: tauri::AppHandle,
     server_id: String,
 ) -> CommandResult<Vec<Pm2Process>> {
-    let session_manager = {
-        let sm_guard = state.session_manager.lock().await;
-        sm_guard.clone()
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    
+    let output_res = {
+        let mut session = session_arc.lock().await;
+        exec_ssh_command(&mut session, "pm2 jlist").await
     };
 
-    let mut session = session_manager
-        .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
-        .await?;
-
-    let output = exec_ssh_command(&mut session, "pm2 jlist").await?;
+    let output = match output_res {
+        Ok(out) => out,
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("ConnectFailed") || err_str.contains("Failed to open SSH channel") || err_str.contains("closed") {
+                log::warn!("PM2 SSH channel failed ({}), reconnecting...", err_str);
+                state.session_manager.evict_session(&server_id).await;
+                let new_session_arc = state.session_manager
+                    .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+                    .await?;
+                let mut new_session = new_session_arc.lock().await;
+                exec_ssh_command(&mut new_session, "pm2 jlist").await?
+            } else {
+                return Err(e);
+            }
+        }
+    };
 
     if output.trim().is_empty() {
         return Err(CommandError::Internal("PM2 not found or empty output (ensure PM2 is in PATH)".into()));
@@ -125,6 +145,39 @@ pub async fn list_processes(
             0
         };
 
+        let mut env_redacted = entry.pm2_env.env.clone();
+        if let Some(serde_json::Value::Object(ref mut map)) = env_redacted {
+            for (k, v) in map.iter_mut() {
+                let k_lower = k.to_lowercase();
+                let is_sensitive_key = k_lower.contains("secret")
+                    || k_lower.contains("password")
+                    || k_lower.contains("token")
+                    || k_lower.contains("key")
+                    || k_lower.contains("pass")
+                    || k_lower.contains("auth")
+                    || k_lower.contains("cred")
+                    || k_lower.contains("private")
+                    || k_lower.contains("hash")
+                    || k_lower.contains("salt")
+                    || k_lower.contains("cookie")
+                    || k_lower.contains("jwt")
+                    || k_lower.contains("api")
+                    || k_lower.contains("cert")
+                    || k_lower.contains("database_url")
+                    || k_lower.contains("db_pass")
+                    || k_lower.contains("conn_str")
+                    || k_lower.contains("dsn")
+                    || k_lower.contains("webhook")
+                    || k_lower.contains("session");
+
+                if is_sensitive_key {
+                    *v = serde_json::Value::String("***REDACTED***".to_string());
+                } else if let serde_json::Value::String(ref val_str) = v {
+                    *v = serde_json::Value::String(crate::secrets::redact::redact_secrets(val_str));
+                }
+            }
+        }
+
         result.push(Pm2Process {
             pm_id: entry.pm_id,
             name: entry.name,
@@ -136,7 +189,7 @@ pub async fn list_processes(
             script_path: entry.pm2_env.pm_exec_path,
             pm_cwd: entry.pm2_env.pm_cwd,
             pm_err_log_path: entry.pm2_env.pm_err_log_path,
-            env: entry.pm2_env.env,
+            env: env_redacted,
         });
     }
 
@@ -189,14 +242,9 @@ pub async fn delete_process(
     app_handle: tauri::AppHandle,
     server_id: String,
     process_id: String,
-    confirmation_token: String,
+    confirmation_token: Option<String>,
 ) -> CommandResult<()> {
-    // Stage 2: Gate destructive action
-    // In a full implementation we would check `state.confirm_gate.verify(&confirmation_token)`
-    // Here we just demand the token is present to simulate the chokepoint
-    if confirmation_token.is_empty() {
-        return Err(CommandError::Validation("Missing confirmation token for deletion".into()));
-    }
+    crate::commands::confirmation::consume_token(confirmation_token.as_deref()).await?;
     execute_pm2_action(state, app_handle, server_id, "delete", process_id, true, None).await
 }
 
@@ -221,31 +269,49 @@ async fn execute_pm2_action(
     _token: Option<String>,
 ) -> CommandResult<()> {
     let start = Instant::now();
-    let session_manager = {
-        let sm_guard = state.session_manager.lock().await;
-        sm_guard.clone()
-    };
-
-    let mut session = session_manager
-        .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
-
     let cmd = if action == "save" {
         "pm2 save".to_string()
     } else {
         format!("pm2 {} {}", action, target)
     };
 
-    let result = exec_ssh_command(&mut session, &cmd).await;
+    let mut result = {
+        let mut session = session_arc.lock().await;
+        exec_ssh_command(&mut session, &cmd).await
+    };
+
+    if let Err(ref e) = result {
+        let err_str = e.to_string();
+        if err_str.contains("ConnectFailed") || err_str.contains("Failed to open SSH channel") || err_str.contains("closed") {
+            log::warn!("PM2 action SSH channel failed ({}), reconnecting...", err_str);
+            state.session_manager.evict_session(&server_id).await;
+            if let Ok(new_session_arc) = state.session_manager.get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone()).await {
+                let mut new_session = new_session_arc.lock().await;
+                result = exec_ssh_command(&mut new_session, &cmd).await;
+            }
+        }
+    }
 
     // Stage 5: Audit log
     let status = if result.is_ok() { "success" } else { "failed" };
     let detail = result.as_ref().err().map(|e| e.to_string());
 
     if let Ok(conn) = state.db.lock() {
+        let canonical_action = match action {
+            "start"   => actions::PM2_START,
+            "stop"    => actions::PM2_STOP,
+            "restart" => actions::PM2_RESTART,
+            "reload"  => actions::PM2_RELOAD,
+            "delete"  => actions::PM2_DELETE,
+            "save"    => actions::PM2_SAVE,
+            other     => other,  // fallback — shouldn't happen
+        };
         log_activity(&conn, ActivityEntry {
             server_id: Some(server_id),
-            action: format!("pm2_{}", action),
+            action: canonical_action.into(),
             target: if action == "save" { None } else { Some(target) },
             status: status.into(),
             detail,
@@ -264,15 +330,26 @@ pub async fn tail_process_log(
     log_path: String,
     lines: u32,
 ) -> CommandResult<String> {
-    let session_manager = {
-        let sm_guard = state.session_manager.lock().await;
-        sm_guard.clone()
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let cmd = format!("tail -n {} \"{}\"", lines, log_path);
+    let mut result = {
+        let mut session = session_arc.lock().await;
+        exec_ssh_command(&mut session, &cmd).await
     };
 
-    let mut session = session_manager
-        .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
-        .await?;
+    if let Err(ref e) = result {
+        let err_str = e.to_string();
+        if err_str.contains("ConnectFailed") || err_str.contains("Failed to open SSH channel") || err_str.contains("closed") {
+            state.session_manager.evict_session(&server_id).await;
+            if let Ok(new_session_arc) = state.session_manager.get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone()).await {
+                let mut new_session = new_session_arc.lock().await;
+                result = exec_ssh_command(&mut new_session, &cmd).await;
+            }
+        }
+    }
 
-    let cmd = format!("tail -n {} \"{}\"", lines, log_path);
-    exec_ssh_command(&mut session, &cmd).await
+    let output = result?;
+    Ok(crate::secrets::redact::redact_secrets(&output))
 }

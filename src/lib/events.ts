@@ -10,7 +10,7 @@ export const subscribeToEvent = async <T extends AppEvent['type']>(
   event: T,
   handler: (payload: Extract<AppEvent, { type: T }>['payload']) => void
 ): Promise<UnlistenFn> => {
-  return await listen<Extract<AppEvent, { type: T }>['payload']>(event, (e) => {
+  return await listen<any>(event, (e) => {
     handler(e.payload);
   });
 };

@@ -3,10 +3,11 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { RefreshCw, Trash2, Search, Copy, Type } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { showIpcError, formatErrorMessage } from '@/lib/error-handler';
 import '@xterm/xterm/css/xterm.css';
 
 interface TerminalProps {
@@ -25,7 +26,7 @@ interface TerminalStatusEvent {
   pty_id: string;
 }
 
-export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive = true, onStatusChange }) => {
+export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose, isActive = true, onStatusChange }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -134,8 +135,8 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive 
         });
 
       } catch (err) {
-        console.error('Failed to start terminal session:', err);
-        term.write(`\r\n\x1b[31mError starting session: ${err}\x1b[0m\r\n`);
+        showIpcError(err, { action: 'Start Terminal Session' });
+        term.write(`\r\n\x1b[31mError starting session: ${formatErrorMessage(err)}\x1b[0m\r\n`);
       }
     };
 
@@ -143,7 +144,7 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive 
     return () => {
       const ptyId = ptyIdRef.current;
       if (ptyId) {
-        invoke('close_terminal', { sessionId: ptyId }).catch(console.error);
+        invoke('close_terminal', { sessionId: ptyId }).catch(() => {});
       }
       
       unlistenDataRef.current?.();
@@ -159,7 +160,7 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive 
     
     // Close old session
     if (ptyIdRef.current) {
-      invoke('close_terminal', { sessionId: ptyIdRef.current }).catch(console.error);
+      invoke('close_terminal', { sessionId: ptyIdRef.current }).catch(() => {});
     }
     unlistenDataRef.current?.();
     unlistenClosedRef.current?.();
@@ -203,8 +204,8 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive 
         unlistenDisconnectedRef.current = await listen<TerminalStatusEvent>(`terminal://disconnected:${ptyId}`, handleTeardown);
 
       } catch (err) {
-        console.error('Failed to reconnect:', err);
-        xtermRef.current?.write(`\r\n\x1b[31mError starting session: ${err}\x1b[0m\r\n`);
+        showIpcError(err, { action: 'Reconnect Terminal Session' });
+        xtermRef.current?.write(`\r\n\x1b[31mError starting session: ${formatErrorMessage(err)}\x1b[0m\r\n`);
         onStatusChange?.('disconnected');
       }
     };
@@ -254,9 +255,9 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose, isActive 
         const term = xtermRef.current;
         invoke('resize_terminal', {
           sessionId: ptyIdRef.current,
-          cols: term.cols,
-          rows: term.rows,
-        }).catch(console.error);
+          cols: term.cols || 80,
+          rows: term.rows || 24,
+        }).catch(() => {});
       } catch (e) {
         // fit() can throw if container is hidden/0px
       }

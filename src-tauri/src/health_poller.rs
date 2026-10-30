@@ -50,7 +50,10 @@ cat /proc/uptime | awk '{print $1}'
         let msg_future = channel.wait();
         let msg_opt = match timeout(timeout_duration, msg_future).await {
             Ok(opt) => opt,
-            Err(_) => return Err(CommandError::Internal("Health poll script timed out".into())),
+            Err(_) => {
+                let _ = channel.close().await;
+                return Err(CommandError::Internal("Health poll script timed out".into()));
+            }
         };
 
         match msg_opt {
@@ -64,6 +67,7 @@ cat /proc/uptime | awk '{print $1}'
         }
     }
 
+    let _ = channel.close().await;
     parse_health_snapshot(&output)
 }
 

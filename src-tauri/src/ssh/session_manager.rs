@@ -3,13 +3,11 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
 use tokio::time::{Instant, Duration};
 use russh::client::Handle;
-use tauri::AppHandle;
 use crate::ssh::client::SshClientHandler;
 use crate::error::CommandError;
-use crate::AppState;
 
 pub struct SessionInfo {
-    pub handle: Handle<SshClientHandler>,
+    pub handle: Arc<Mutex<Handle<SshClientHandler>>>,
     pub last_used: Instant,
 }
 
@@ -17,6 +15,7 @@ pub struct SessionInfo {
 pub struct SessionManager {
     sessions: Arc<Mutex<HashMap<String, SessionInfo>>>,
     pub pending_verifications: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    pub trusted_host_keys: Arc<std::sync::Mutex<HashMap<String, String>>>,
 }
 
 impl SessionManager {
@@ -24,11 +23,12 @@ impl SessionManager {
         let manager = Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_verifications: Arc::new(Mutex::new(HashMap::new())),
+            trusted_host_keys: Arc::new(std::sync::Mutex::new(HashMap::new())),
         };
 
         // Start idle eviction loop
         let sessions_ref = manager.sessions.clone();
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let timeout = Duration::from_secs(15 * 60); // 15 minutes
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await; // Check every minute
@@ -50,81 +50,96 @@ impl SessionManager {
     }
 
     /// Fetches an existing healthy session, returning None if not found or closed.
-    pub async fn get_session(&self, server_id: &str) -> Option<Handle<SshClientHandler>> {
+    pub async fn get_session(&self, server_id: &str) -> Option<Arc<Mutex<Handle<SshClientHandler>>>> {
         let mut map = self.sessions.lock().await;
+        if let Some(info) = map.get(server_id) {
+            let is_dead = {
+                let guard = info.handle.lock().await;
+                guard.is_closed()
+            };
+            if is_dead {
+                map.remove(server_id);
+                return None;
+            }
+        }
         if let Some(info) = map.get_mut(server_id) {
-            // Check if connection is still healthy by pinging or relying on channel errors later
             info.last_used = Instant::now();
             return Some(info.handle.clone());
         }
         None
     }
 
-    pub async fn insert_session(&self, server_id: String, handle: Handle<SshClientHandler>) {
+    pub async fn insert_session(&self, server_id: String, handle: Handle<SshClientHandler>) -> Arc<Mutex<Handle<SshClientHandler>>> {
         let mut map = self.sessions.lock().await;
+        let arc_handle = Arc::new(Mutex::new(handle));
         map.insert(server_id, SessionInfo {
-            handle,
+            handle: arc_handle.clone(),
             last_used: Instant::now(),
         });
+        arc_handle
     }
 
     pub async fn close_session(&self, server_id: &str) -> Result<(), CommandError> {
         let mut map = self.sessions.lock().await;
-        if let Some(mut info) = map.remove(server_id) {
-            let _ = info.handle.disconnect(russh::Disconnect::ByApplication, "Closed by user", "en-US").await;
+        if let Some(info) = map.remove(server_id) {
+            let handle = info.handle.lock().await;
+            let _ = handle.disconnect(russh::Disconnect::ByApplication, "Closed by user", "en-US").await;
         }
         Ok(())
+    }
+
+    pub async fn evict_session(&self, server_id: &str) {
+        let mut map = self.sessions.lock().await;
+        if let Some(info) = map.remove(server_id) {
+            let handle = info.handle.lock().await;
+            let _ = handle.disconnect(russh::Disconnect::ByApplication, "Evicted dead session", "en-US").await;
+        }
     }
 
     pub async fn get_or_connect(
         &self,
         server_id: String,
-        state: tauri::State<'_, AppState>,
+        db: Arc<std::sync::Mutex<rusqlite::Connection>>,
         app_handle: tauri::AppHandle,
-    ) -> Result<Handle<SshClientHandler>, CommandError> {
+    ) -> Result<Arc<Mutex<Handle<SshClientHandler>>>, CommandError> {
         if let Some(handle) = self.get_session(&server_id).await {
             return Ok(handle);
         }
 
         // We need to connect.
         // 1. Fetch server & credential info
-        let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
-        let server_details: (String, u16, String) = conn.query_row(
-            "SELECT hostname, ssh_port, username FROM servers WHERE id = ?1",
-            [&server_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).map_err(|_| CommandError::NotFound("Server not found".into()))?;
-        
-        let (hostname, ssh_port, username) = server_details;
+        let (server_details, cred_details) = {
+            let conn = db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
+            let server_details: (String, String, u16, String) = conn.query_row(
+                "SELECT name, hostname, ssh_port, username FROM servers WHERE id = ?1",
+                [&server_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            ).map_err(|_| CommandError::NotFound("Server not found".into()))?;
 
-        // Note: For real use, we need the auth_method to know what credential to use.
-        // If there are multiple, we pick the first or specify one.
-        // For now we just get the first credential for this server.
-        let cred_details: Result<(String, String), _> = conn.query_row(
-            "SELECT auth_method, keychain_ref FROM credentials WHERE server_id = ?1 LIMIT 1",
-            [&server_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        );
-        let db_arc = Arc::new(std::sync::Mutex::new(crate::db::init_db(
-            &app_handle.path().app_data_dir().unwrap().join("command_center.sqlite")
-        ).unwrap())); // We create a new clone of the DB connection for the handler to own, or we could pass AppState.
+            let cred_details: Result<(String, String), _> = conn.query_row(
+                "SELECT auth_method, keychain_ref FROM credentials WHERE server_id = ?1 LIMIT 1",
+                [&server_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            (server_details, cred_details)
+        };
         
-        drop(conn);
-
+        let (server_name, hostname, ssh_port, username) = server_details;
         let (auth_method, keychain_ref) = cred_details.map_err(|_| CommandError::NotFound("No credentials found for server".into()))?;
 
         // 2. Fetch decrypted secret
-        // For now, if it requires a master password, we might fail unless it's stored in session/vault.
-        // This is a known architectural challenge for background connects. We'll use the vault::read_entry 
-        // without prompting if we can, but vault::unlock requires the password. 
-        // We will assume the vault state was unlocked elsewhere or it's a simple OS keychain secret for MVP.
-        let mut secret = match auth_method.as_str() {
+        let secret = match auth_method.as_str() {
             "password" | "ssh_agent" => {
-                crate::secrets::keychain::read_secret(&keychain_ref)?
+                let sec = crate::secrets::keychain::read_secret(&keychain_ref)
+                    .map_err(|_| CommandError::NotFound("No saved password found in Keychain. Please edit the server and re-enter your SSH password.".into()))?;
+                zeroize::Zeroizing::new(sec)
             }
             "private_key" | "password_key" => {
-                // Return an error for now if we can't get the master password here.
-                return Err(CommandError::Internal("Background connect for Vault-secured credentials requires active session integration".into()));
+                if let Ok(sec) = crate::secrets::keychain::read_secret(&keychain_ref) {
+                    zeroize::Zeroizing::new(sec)
+                } else {
+                    return Err(CommandError::Validation("Vault is locked. Please unlock the Vault in Settings to connect using private keys.".into()));
+                }
             }
             _ => return Err(CommandError::Internal("Unknown auth method".into())),
         };
@@ -133,9 +148,13 @@ impl SessionManager {
         let config = Arc::new(russh::client::Config::default());
         let handler = SshClientHandler {
             server_id: server_id.clone(),
+            server_name: Some(server_name),
+            hostname: Some(hostname.clone()),
+            port: ssh_port,
             app_handle,
-            db: db_arc,
+            db: db.clone(),
             pending_verifications: self.pending_verifications.clone(),
+            trusted_host_keys: self.trusted_host_keys.clone(),
         };
 
         let mut session = russh::client::connect(
@@ -148,15 +167,19 @@ impl SessionManager {
         let auth_future = async {
             match auth_method.as_str() {
                 "password" => {
-                    let res = session.authenticate_password(username, &secret).await;
-                    use zeroize::Zeroize;
-                    secret.zeroize();
-                    res
+                    let res = session.authenticate_password(username, &*secret).await
+                        .map_err(|e| CommandError::Internal(crate::secrets::redact::redact_secrets(&e.to_string())))?;
+                    Ok(res)
+                }
+                "private_key" | "password_key" => {
+                    let key_pair = russh_keys::decode_secret_key(&secret, None)
+                        .map_err(|e| CommandError::Internal(crate::secrets::redact::redact_secrets(&e.to_string())))?;
+                    let res = session.authenticate_publickey(username, Arc::new(key_pair)).await
+                        .map_err(|e| CommandError::Internal(crate::secrets::redact::redact_secrets(&e.to_string())))?;
+                    Ok(res)
                 }
                 _ => {
-                    use zeroize::Zeroize;
-                    secret.zeroize();
-                    return Err(CommandError::Validation("Auth method not supported in this MVP".into()));
+                    Err(CommandError::Validation("Auth method not supported".into()))
                 }
             }
         };
@@ -167,9 +190,8 @@ impl SessionManager {
 
         match auth_result {
             Ok(true) => {
-                let handle = session.clone();
-                self.insert_session(server_id, session).await;
-                Ok(handle)
+                let arc_handle = self.insert_session(server_id, session).await;
+                Ok(arc_handle)
             }
             Ok(false) => Err(CommandError::Internal("Authentication failed".into())),
             Err(e) => Err(e),

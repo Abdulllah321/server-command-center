@@ -5,6 +5,16 @@ pub mod terminal;
 pub mod external_ssh;
 pub mod health;
 pub mod applications;
+pub mod commands;
+pub mod confirmation;
+pub mod activity;
+pub mod search;
+pub mod groups;
+pub mod known_hosts;
 pub mod pm2;
 pub mod logs;
 pub mod rebuild;
+pub mod backups;
+pub mod nginx;
+pub mod alerts;
+

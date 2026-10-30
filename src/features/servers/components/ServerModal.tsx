@@ -1,106 +1,199 @@
-import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import * as z from 'zod';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { useCreateServerFlow } from '../api/use-server-mutations';
-import { testConnection } from '@/lib/tauri-client';
-import type { AuthMethod } from '@/types';
+import { toast } from 'sonner';
+import { showIpcError } from '@/lib/error-handler';
+import { testDirectConnection, testConnection, updateServer, createCredential } from '@/lib/tauri-client';
+import type { AuthMethod, Environment, Server } from '@/types';
 import { Loader2 } from 'lucide-react';
-
-const serverFormSchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  hostname: z.string().min(1, 'Hostname or IP is required'),
-  ssh_port: z.coerce.number().min(1).max(65535).default(22),
-  username: z.string().min(1, 'Username is required'),
-  os: z.string().optional(),
-  provider: z.string().optional(),
-  environment: z.string().default('development'),
-  description: z.string().optional(),
-  tags: z.string().optional(),
-  auth_method: z.enum(['password', 'private_key', 'ssh_agent', 'password_key']),
-  secret_payload: z.string().optional(),
-  master_password: z.string().optional(),
-});
-
-type ServerFormValues = z.infer<typeof serverFormSchema>;
+import { useVaultStore } from '@/stores/use-vault-store';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface ServerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  serverToEdit?: Server | null;
+  onSaved?: (server: Server) => void;
 }
 
-export const ServerModal = ({ open, onOpenChange }: ServerModalProps) => {
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  
-  const form = useForm<ServerFormValues>({
-    resolver: zodResolver(serverFormSchema),
-    defaultValues: {
-      ssh_port: 22,
-      environment: 'development',
-      auth_method: 'password',
-    },
-  });
+export const ServerModal = ({ open, onOpenChange, serverToEdit, onSaved }: ServerModalProps) => {
+  const queryClient = useQueryClient();
+  const isEditing = !!serverToEdit;
 
-  const authMethod = form.watch('auth_method');
+  const [name, setName] = useState('');
+  const [hostname, setHostname] = useState('');
+  const [sshPort, setSshPort] = useState(22);
+  const [username, setUsername] = useState('root');
+  const [environment, setEnvironment] = useState<Environment>('dev');
+  const [tags, setTags] = useState('');
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('password');
+  const [secretPayload, setSecretPayload] = useState('');
+  const [masterPassword, setMasterPassword] = useState('');
+
+  const [isTesting, setIsTesting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
   const createFlow = useCreateServerFlow();
 
+  useEffect(() => {
+    if (open) {
+      if (serverToEdit) {
+        setName(serverToEdit.name || '');
+        setHostname(serverToEdit.hostname || '');
+        setSshPort(serverToEdit.ssh_port || 22);
+        setUsername(serverToEdit.username || 'root');
+        setEnvironment((serverToEdit.environment as Environment) || 'dev');
+        setTags(serverToEdit.tags ? serverToEdit.tags.join(', ') : '');
+        setAuthMethod('password');
+        setSecretPayload('');
+        setMasterPassword('');
+        setTestResult(null);
+      } else {
+        setName('');
+        setHostname('');
+        setSshPort(22);
+        setUsername('root');
+        setEnvironment('dev');
+        setTags('');
+        setAuthMethod('password');
+        setSecretPayload('');
+        setMasterPassword('');
+        setTestResult(null);
+      }
+    }
+  }, [open, serverToEdit]);
+
   const handleTestConnection = async () => {
-    const values = form.getValues();
-    // In a real app we might test BEFORE we have an ID by adding a specific command for test_params,
-    // but the backend Task 11 command expects a server_id, meaning the server needs to exist in the DB,
-    // and the credential needs to exist to test it via 'test_connection'.
-    // Wait, the backend test_connection expects a server_id. But this is the "Add Server" modal where the server doesn't exist yet!
-    // Ah, my backend test_connection implementation in ssh.rs takes `server_id` and pulls from DB!
-    // If I want to test inline before saving, the backend needs a way to test raw params, OR we save first.
-    // For now, let's simulate the test locally or show a warning.
-    // Actually, I can just mock the UI test or require save first, or we assume a different command exists.
+    if (!hostname.trim() || !username.trim()) {
+      toast.error('Please enter Hostname and SSH Username to test');
+      return;
+    }
+
     setIsTesting(true);
     setTestResult(null);
     try {
-      // Fake delay for UI since we can't test unsaved servers with our current backend signature
-      await new Promise(r => setTimeout(r, 1000));
-      setTestResult({ success: true, message: 'Connection successful (simulated for unsaved server)' });
+      if (secretPayload.trim() || authMethod === 'ssh_agent') {
+        // Direct test with entered credentials
+        await testDirectConnection({
+          server_id: serverToEdit?.id,
+          server_name: name.trim() || undefined,
+          hostname: hostname.trim(),
+          ssh_port: Number(sshPort) || 22,
+          username: username.trim(),
+          auth_method: authMethod,
+          secret_payload: secretPayload,
+        });
+        setTestResult({ success: true, message: 'SSH connection & authentication succeeded!' });
+      } else if (serverToEdit) {
+        // Test existing saved credentials for this server
+        await testConnection(
+          serverToEdit.id,
+          authMethod,
+          masterPassword || useVaultStore.getState().masterPassword || undefined
+        );
+        setTestResult({ success: true, message: 'SSH connection & authentication succeeded with saved credentials!' });
+      } else {
+        toast.error(`Please enter your SSH ${authMethod === 'password' ? 'password' : 'private key'} to test`);
+        setIsTesting(false);
+        return;
+      }
     } catch (err: any) {
-      setTestResult({ success: false, message: err.message || 'Connection failed' });
+      setTestResult({ success: false, message: err.message || String(err) });
     } finally {
       setIsTesting(false);
     }
   };
 
-  const onSubmit = async (values: ServerFormValues) => {
-    const tagsArray = values.tags ? values.tags.split(',').map(t => t.trim()) : [];
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !hostname.trim() || !username.trim()) {
+      toast.error('Please fill in all required fields (name, hostname, username)');
+      return;
+    }
+
+    if (!isEditing && authMethod !== 'ssh_agent' && !secretPayload.trim()) {
+      toast.error(`Please enter your SSH ${authMethod === 'password' ? 'password' : 'private key'}`);
+      return;
+    }
+
+    const tagsArray = tags ? tags.split(',').map(t => t.trim()).filter(Boolean) : [];
     
-    try {
-      await createFlow.mutateAsync({
-        server: {
-          name: values.name,
-          hostname: values.hostname,
-          ssh_port: values.ssh_port,
-          username: values.username,
-          os: values.os,
-          provider: values.provider,
-          environment: values.environment,
-          description: values.description,
+    if (isEditing && serverToEdit) {
+      setIsSaving(true);
+      try {
+        const updated = await updateServer(serverToEdit.id, {
+          name: name.trim(),
+          hostname: hostname.trim(),
+          ssh_port: Number(sshPort) || 22,
+          username: username.trim(),
+          environment,
           tags: tagsArray,
-        },
-        credential: {
-          auth_method: values.auth_method,
-          secret_payload: values.secret_payload || '',
+        });
+
+        if (secretPayload.trim() || authMethod === 'ssh_agent') {
+          await createCredential({
+            server_id: serverToEdit.id,
+            auth_method: authMethod,
+            secret_payload: secretPayload,
+            master_password: masterPassword || useVaultStore.getState().masterPassword,
+          });
+
+          if (masterPassword) {
+            useVaultStore.getState().unlock(masterPassword);
+          } else if (authMethod === 'private_key' || authMethod === 'password_key') {
+            useVaultStore.getState().pingVaultActivity();
+          }
         }
-      });
-      onOpenChange(false);
-      form.reset();
-      setTestResult(null);
-    } catch (err: any) {
-      console.error(err);
-      // Could show toast here
+
+        queryClient.invalidateQueries({ queryKey: ['servers'] });
+        queryClient.invalidateQueries({ queryKey: ['server', serverToEdit.id] });
+        toast.success(`Server "${updated.name}" updated successfully`);
+        onSaved?.(updated);
+        onOpenChange(false);
+      } catch (err: any) {
+        showIpcError(err, { action: 'Update Server', serverName: serverToEdit.name });
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      try {
+        const newServer = await createFlow.mutateAsync({
+          server: {
+            name: name.trim(),
+            hostname: hostname.trim(),
+            ssh_port: Number(sshPort) || 22,
+            username: username.trim(),
+            os: null,
+            provider: null,
+            environment,
+            description: null,
+            tags: tagsArray,
+          },
+          credential: {
+            auth_method: authMethod,
+            secret_payload: secretPayload,
+            master_password: masterPassword || useVaultStore.getState().masterPassword,
+          }
+        });
+        
+        if (masterPassword) {
+          useVaultStore.getState().unlock(masterPassword);
+        } else if (authMethod === 'private_key' || authMethod === 'password_key') {
+          useVaultStore.getState().pingVaultActivity();
+        }
+        
+        queryClient.invalidateQueries({ queryKey: ['servers'] });
+        toast.success('Server added successfully');
+        onSaved?.(newServer);
+        onOpenChange(false);
+      } catch (err: any) {
+        showIpcError(err, { action: 'Add Server' });
+      }
     }
   };
 
@@ -108,132 +201,161 @@ export const ServerModal = ({ open, onOpenChange }: ServerModalProps) => {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl bg-card border-primary/20">
         <DialogHeader>
-          <DialogTitle>Add Server</DialogTitle>
+          <DialogTitle>{isEditing ? `Edit Server — ${serverToEdit?.name}` : 'Add Server'}</DialogTitle>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <FormField control={form.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name</FormLabel>
-                  <FormControl><Input placeholder="Production DB" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="environment" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Environment</FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Select env" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value="production">Production</SelectItem>
-                      <SelectItem value="staging">Staging</SelectItem>
-                      <SelectItem value="development">Development</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name *</label>
+              <Input 
+                placeholder="Production DB" 
+                value={name} 
+                onChange={e => setName(e.target.value)} 
+                required 
+              />
             </div>
-
-            <div className="grid grid-cols-3 gap-4">
-              <FormField control={form.control} name="hostname" render={({ field }) => (
-                <FormItem className="col-span-2">
-                  <FormLabel>Hostname / IP</FormLabel>
-                  <FormControl><Input placeholder="192.168.1.10" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="ssh_port" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>SSH Port</FormLabel>
-                  <FormControl><Input type="number" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Environment</label>
+              <Select value={environment} onValueChange={(v) => setEnvironment((v as Environment) || 'dev')}>
+                <SelectTrigger><SelectValue placeholder="Select env" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="production">Production</SelectItem>
+                  <SelectItem value="staging">Staging</SelectItem>
+                  <SelectItem value="dev">Dev</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+          </div>
 
-            <FormField control={form.control} name="username" render={({ field }) => (
-              <FormItem>
-                <FormLabel>SSH Username</FormLabel>
-                <FormControl><Input placeholder="root" {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2 space-y-2">
+              <label className="text-sm font-medium">Hostname / IP *</label>
+              <Input 
+                placeholder="192.168.1.10" 
+                value={hostname} 
+                onChange={e => setHostname(e.target.value)} 
+                required 
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">SSH Port</label>
+              <Input 
+                type="number" 
+                value={sshPort} 
+                onChange={e => setSshPort(Number(e.target.value))} 
+                min={1} 
+                max={65535} 
+              />
+            </div>
+          </div>
 
-            <div className="border-t border-border pt-6">
-              <h3 className="text-lg font-medium mb-4">Authentication</h3>
-              <div className="space-y-4">
-                <FormField control={form.control} name="auth_method" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Auth Method</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="password">Password</SelectItem>
-                        <SelectItem value="private_key">Private Key (Vault)</SelectItem>
-                        <SelectItem value="ssh_agent">SSH Agent</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">SSH Username *</label>
+              <Input 
+                placeholder="root" 
+                value={username} 
+                onChange={e => setUsername(e.target.value)} 
+                required 
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Tags (comma separated)</label>
+              <Input 
+                placeholder="db, production, redis" 
+                value={tags} 
+                onChange={e => setTags(e.target.value)} 
+              />
+            </div>
+          </div>
 
-                {authMethod === 'password' && (
-                  <FormField control={form.control} name="secret_payload" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl><Input type="password" placeholder="•••" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                )}
-
-                {authMethod === 'private_key' && (
-                  <>
-                    <FormField control={form.control} name="secret_payload" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Private Key (PEM)</FormLabel>
-                        <FormControl>
-                          <Textarea placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." className="font-mono text-xs h-32" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form.control} name="master_password" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Vault Master Password (to unlock vault)</FormLabel>
-                        <FormControl><Input type="password" placeholder="Required for Vault storage" {...field} /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </>
-                )}
+          <div className="border-t border-border pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium">Authentication</h3>
+              {isEditing && (
+                <span className="text-xs text-muted-foreground">
+                  (Leave blank to keep existing stored credentials)
+                </span>
+              )}
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Auth Method</label>
+                <Select value={authMethod} onValueChange={(v) => setAuthMethod((v as AuthMethod) || 'password')}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="password">Password</SelectItem>
+                    <SelectItem value="private_key">Private Key (Vault)</SelectItem>
+                    <SelectItem value="ssh_agent">SSH Agent</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+
+              {authMethod === 'password' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">
+                    Password {isEditing ? '(optional)' : '*'}
+                  </label>
+                  <Input 
+                    type="password" 
+                    placeholder={isEditing ? 'Enter new password to update (or leave blank)' : 'Enter SSH password'} 
+                    value={secretPayload} 
+                    onChange={e => setSecretPayload(e.target.value)} 
+                    required={!isEditing}
+                  />
+                </div>
+              )}
+
+              {authMethod === 'private_key' && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">
+                      Private Key (PEM) {isEditing ? '(optional)' : '*'}
+                    </label>
+                    <Textarea 
+                      placeholder={isEditing ? 'Enter new private key to update (or leave blank)' : '-----BEGIN OPENSSH PRIVATE KEY-----...'} 
+                      className="font-mono text-xs h-32" 
+                      value={secretPayload} 
+                      onChange={e => setSecretPayload(e.target.value)} 
+                      required={!isEditing}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Vault Master Password (to unlock/save to vault)</label>
+                    <Input 
+                      type="password" 
+                      placeholder="Required for Vault storage" 
+                      value={masterPassword} 
+                      onChange={e => setMasterPassword(e.target.value)} 
+                    />
+                  </div>
+                </>
+              )}
             </div>
+          </div>
 
-            {testResult && (
-              <div className={`p-3 rounded text-sm ${testResult.success ? 'bg-green-500/10 text-green-500' : 'bg-destructive/10 text-destructive'}`}>
-                {testResult.message}
-              </div>
-            )}
+          {testResult && (
+            <div className={`p-3 rounded text-sm ${testResult.success ? 'bg-green-500/10 text-green-500' : 'bg-destructive/10 text-destructive'}`}>
+              {testResult.message}
+            </div>
+          )}
 
-            <div className="flex justify-between border-t border-border pt-4">
-              <Button type="button" variant="secondary" onClick={handleTestConnection} disabled={isTesting}>
-                {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Test Connection
+          <div className="flex justify-between border-t border-border pt-4">
+            <Button type="button" variant="secondary" onClick={handleTestConnection} disabled={isTesting}>
+              {isTesting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Test Connection
+            </Button>
+            <div className="space-x-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="submit" disabled={createFlow.isPending || isSaving}>
+                {(createFlow.isPending || isSaving) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isEditing ? 'Save Changes' : 'Save Server'}
               </Button>
-              <div className="space-x-2">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                <Button type="submit" disabled={createFlow.isPending}>
-                  {createFlow.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save Server
-                </Button>
-              </div>
             </div>
-          </form>
-        </Form>
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   );

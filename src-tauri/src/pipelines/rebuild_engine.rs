@@ -1,14 +1,13 @@
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use uuid::Uuid;
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Emitter};
 use crate::AppState;
 use crate::error::{CommandResult, CommandError};
 use crate::commands::rebuild::RebuildProfile;
 use rusqlite::OptionalExtension;
-use tokio::time::{timeout, Duration};
 use russh::ChannelMsg;
 use crate::db::{log_activity, ActivityEntry};
 use std::time::Instant;
@@ -33,8 +32,9 @@ pub struct CompletePayload {
 // TODO(security): Implement regex scrubbing for known secrets in output (like NPM_TOKEN)
 // before saving to DB and Activity Log, as build scripts can be verbose and leak env vars on error.
 fn scrub_output(raw: &str) -> String {
-    // For now, return as-is. In a real scenario, run regex replacements.
-    raw.to_string()
+    let re = regex::Regex::new(r"\x1B\[[0-9;]*[a-zA-Z]").unwrap();
+    let stripped = re.replace_all(raw, "").into_owned();
+    crate::secrets::redact::redact_secrets(&stripped)
 }
 
 pub async fn run_pipeline(
@@ -64,52 +64,54 @@ pub async fn run_pipeline(
     let pipeline_id = Uuid::new_v4().to_string();
     
     // Create DB entry for deployment
-    let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
-    
-    let app_name: String = conn.query_row(
-        "SELECT name FROM applications WHERE id = ?1",
-        rusqlite::params![application_id],
-        |row| row.get(0)
-    ).unwrap_or_else(|_| application_id.clone());
-    
-    conn.execute(
-        "INSERT INTO deployments (id, application_id, status, started_at) VALUES (?1, ?2, 'running', datetime('now'))",
-        rusqlite::params![pipeline_id, application_id]
-    ).map_err(|e| CommandError::Internal(e.to_string()))?;
-    
-    for (idx, step) in all_steps.iter().enumerate() {
-        let step_id = Uuid::new_v4().to_string();
+    let (app_name, repo_path, pm2_name): (String, Option<String>, Option<String>) = {
+        let conn = state.db.lock().map_err(|_| CommandError::Internal("DB lock failed".into()))?;
         
-        let initial_status = if let Some(retry_idx) = retry_from_step {
-            if idx < retry_idx { "success" } else { "pending" }
-        } else {
-            "pending"
-        };
-        
-        let initial_output = if let Some(retry_idx) = retry_from_step {
-            if idx < retry_idx { Some("Skipped (Prior step succeeded in previous run)".to_string()) } else { None }
-        } else {
-            None
-        };
+        let (name, repo, pm2) = conn.query_row(
+            "SELECT name, repo_path, pm2_name FROM applications WHERE id = ?1",
+            rusqlite::params![application_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        ).unwrap_or_else(|_| (application_id.clone(), None, None));
         
         conn.execute(
-            "INSERT INTO deployment_steps (id, deployment_id, step_order, label, command, status, output) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![step_id, pipeline_id, idx, step.label, step.command, initial_status, initial_output]
+            "INSERT INTO deployments (id, application_id, status, started_at) VALUES (?1, ?2, 'running', datetime('now'))",
+            rusqlite::params![pipeline_id, application_id]
         ).map_err(|e| CommandError::Internal(e.to_string()))?;
         
-        if let Some(retry_idx) = retry_from_step {
-            if idx < retry_idx {
-                app_handle.emit(&format!("pipeline://step-update:{}", pipeline_id), StepUpdatePayload {
-                    step_index: idx,
-                    status: "success".into(),
-                    output: Some("Skipped (Prior step succeeded in previous run)".into()),
-                    exit_code: Some(0),
-                }).ok();
+        for (idx, step) in all_steps.iter().enumerate() {
+            let step_id = Uuid::new_v4().to_string();
+            
+            let initial_status = if let Some(retry_idx) = retry_from_step {
+                if idx < retry_idx { "success" } else { "pending" }
+            } else {
+                "pending"
+            };
+            
+            let initial_output = if let Some(retry_idx) = retry_from_step {
+                if idx < retry_idx { Some("Skipped (Prior step succeeded in previous run)".to_string()) } else { None }
+            } else {
+                None
+            };
+            
+            conn.execute(
+                "INSERT INTO deployment_steps (id, deployment_id, step_order, label, command, status, output) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![step_id, pipeline_id, idx, step.label, step.command, initial_status, initial_output]
+            ).map_err(|e| CommandError::Internal(e.to_string()))?;
+            
+            if let Some(retry_idx) = retry_from_step {
+                if idx < retry_idx {
+                    app_handle.emit(&format!("pipeline://step-update:{}", pipeline_id), StepUpdatePayload {
+                        step_index: idx,
+                        status: "success".into(),
+                        output: Some("Skipped (Prior step succeeded in previous run)".into()),
+                        exit_code: Some(0),
+                    }).ok();
+                }
             }
         }
-    }
-    
-    drop(conn);
+
+        (name, repo, pm2)
+    };
 
     let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
     
@@ -120,23 +122,23 @@ pub async fn run_pipeline(
     
     let pipeline_id_clone = pipeline_id.clone();
     let app_handle_clone = app_handle.clone();
-    let state_clone = state.inner().clone();
+    let db_clone = state.db.clone();
+    let session_manager_clone = state.session_manager.clone();
+    let app_name_clone = app_name.clone();
+    let repo_path_clone = repo_path.clone();
+    let pm2_name_clone = pm2_name.clone();
     
     tokio::spawn(async move {
         let mut overall_success = true;
         let mut failed_step_info: Option<(String, Option<i32>)> = None;
         let mut all_logs = String::new();
         let pipeline_start = Instant::now();
-        
-        let session_manager = {
-            let sm_guard = state_clone.session_manager.lock().await;
-            sm_guard.clone()
-        };
 
         // Try getting session
-        let session_result = session_manager.get_or_connect(server_id.clone(), tauri::State::new(state_clone.clone()), app_handle_clone.clone()).await;
+        let session_result = session_manager_clone.get_or_connect(server_id.clone(), db_clone.clone(), app_handle_clone.clone()).await;
         
-        if let Ok(mut session) = session_result {
+        if let Ok(session_arc) = session_result {
+            let session = session_arc.lock().await;
             for (idx, step) in all_steps.iter().enumerate() {
                 // If we're retrying and this step is before retry point, skip execution
                 if let Some(retry_idx) = retry_from_step {
@@ -154,7 +156,7 @@ pub async fn run_pipeline(
                 }
                 
                 // Update DB to running
-                if let Ok(conn) = state_clone.db.lock() {
+                if let Ok(conn) = db_clone.lock() {
                     let _ = conn.execute("UPDATE deployment_steps SET status = 'running', started_at = datetime('now') WHERE deployment_id = ?1 AND step_order = ?2", rusqlite::params![pipeline_id_clone, idx]);
                 }
                 
@@ -165,21 +167,34 @@ pub async fn run_pipeline(
                     exit_code: None,
                 }).ok();
                 
-                // Execute Step
-                // A note on cancellation (abort_pipeline):
-                // True, immediate remote process interruption (e.g. sending SIGINT) over raw SSH exec channels is unreliable without a PTY.
-                // When we cancel, we drop the channel locally which severs the connection. Some processes handle this (SIGHUP) and die,
-                // but detached processes may continue unsupervised.
-                
-                let mut channel_res = session.channel_open_session().await;
+                // Execute Step with target directory and PM2 variable substitutions
+                let exec_cmd = {
+                    let mut cmd = step.command.clone();
+                    if let Some(ref pm) = pm2_name_clone {
+                        cmd = cmd.replace("{{pm2_name}}", pm);
+                    } else {
+                        cmd = cmd.replace("{{pm2_name}}", &app_name_clone);
+                    }
+                    if let Some(ref rpath) = repo_path_clone {
+                        let trimmed = rpath.trim();
+                        if !trimmed.is_empty() 
+                            && !cmd.starts_with("echo ") 
+                            && !cmd.starts_with("df ") 
+                            && !cmd.starts_with("cd ") 
+                        {
+                            cmd = format!("cd \"{}\" && {}", trimmed, cmd);
+                        }
+                    }
+                    cmd
+                };
+
+                let channel_res = session.channel_open_session().await;
                 let mut step_success = false;
                 let mut step_output = String::new();
                 let mut exit_code: Option<i32> = None;
                 
                 if let Ok(mut channel) = channel_res {
-                    if channel.exec(true, &step.command).await.is_ok() {
-                        let timeout_duration = Duration::from_secs(60 * 10); // 10 min timeout per step max
-                        
+                    if channel.exec(true, exec_cmd.as_str()).await.is_ok() {
                         loop {
                             tokio::select! {
                                 _ = cancel_rx.recv() => {
@@ -188,8 +203,7 @@ pub async fn run_pipeline(
                                     failed_step_info = Some((step.label.clone(), None));
                                     break;
                                 }
-                                msg_future = channel.wait() => {
-                                    let msg_opt = timeout(timeout_duration, msg_future).await.unwrap_or(Some(ChannelMsg::Close));
+                                msg_opt = channel.wait() => {
                                     match msg_opt {
                                         Some(ChannelMsg::Data { ref data }) => {
                                             step_output.push_str(&String::from_utf8_lossy(data));
@@ -209,6 +223,7 @@ pub async fn run_pipeline(
                                 }
                             }
                         }
+                        let _ = channel.close().await;
                     } else {
                         step_output.push_str("Failed to execute command on SSH channel.\n");
                     }
@@ -226,7 +241,7 @@ pub async fn run_pipeline(
                 
                 let final_status = if step_success { "success" } else { "failed" };
                 
-                if let Ok(conn) = state_clone.db.lock() {
+                if let Ok(conn) = db_clone.lock() {
                     let _ = conn.execute(
                         "UPDATE deployment_steps SET status = ?1, output = ?2, exit_code = ?3, finished_at = datetime('now') WHERE deployment_id = ?4 AND step_order = ?5",
                         rusqlite::params![final_status, scrubbed, exit_code, pipeline_id_clone, idx]
@@ -244,7 +259,7 @@ pub async fn run_pipeline(
                     overall_success = false;
                     failed_step_info = Some((step.label.clone(), exit_code));
                     // Mark remaining as skipped
-                    if let Ok(conn) = state_clone.db.lock() {
+                    if let Ok(conn) = db_clone.lock() {
                         let _ = conn.execute(
                             "UPDATE deployment_steps SET status = 'skipped' WHERE deployment_id = ?1 AND status = 'pending'",
                             rusqlite::params![pipeline_id_clone]
@@ -268,7 +283,7 @@ pub async fn run_pipeline(
         // Finalize deployment
         let final_deploy_status = if overall_success { "success" } else { "failed" };
         
-        if let Ok(conn) = state_clone.db.lock() {
+        if let Ok(conn) = db_clone.lock() {
             let _ = conn.execute(
                 "UPDATE deployments SET status = ?1, log_blob = ?2, finished_at = datetime('now'), duration_ms = ?3 WHERE id = ?4",
                 rusqlite::params![final_deploy_status, all_logs, pipeline_start.elapsed().as_millis() as i64, pipeline_id_clone]

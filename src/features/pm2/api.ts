@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
-  Pm2Process, 
+  type Pm2Process, 
   listPm2Processes, 
   startPm2Process, 
   stopPm2Process, 
@@ -35,7 +35,7 @@ export const useStartPm2Process = (serverId: string) => {
       }
       return { previous };
     },
-    onError: (err, newTodo, context) => {
+    onError: (_err, _newTodo, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['pm2', serverId], context.previous);
       }
@@ -60,7 +60,7 @@ export const useStopPm2Process = (serverId: string) => {
       }
       return { previous };
     },
-    onError: (err, newTodo, context) => {
+    onError: (_err, _newTodo, context) => {
       if (context?.previous) {
         queryClient.setQueryData(['pm2', serverId], context.previous);
       }

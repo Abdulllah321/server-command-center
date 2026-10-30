@@ -36,6 +36,9 @@ export const CredentialsList = () => {
       const secret = await revealFlow.mutateAsync({ id, masterPassword: password });
       setRevealedSecret(secret);
       
+      // Ping vault activity since we successfully used it
+      useVaultStore.getState().pingVaultActivity();
+      
       // Auto hide after 15 seconds
       setTimeout(() => {
         setRevealedSecret(null);
@@ -113,16 +116,16 @@ export const CredentialsList = () => {
           <DialogHeader>
             <DialogTitle className="flex items-center">
               {revealedSecret ? <Unlock className="w-5 h-5 mr-2 text-green-500" /> : <Lock className="w-5 h-5 mr-2 text-yellow-500" />}
-              {revealedSecret ? 'Secret Revealed' : 'Unlock Vault'}
+              {revealedSecret ? 'Secret Revealed' : 'Unlock Vault & Reveal'}
             </DialogTitle>
           </DialogHeader>
           
           {revealedSecret ? (
             <div className="space-y-4">
-              <div className="p-4 bg-black/50 border rounded font-mono text-sm break-all max-h-60 overflow-y-auto">
+              <div className="p-4 bg-black/50 border rounded-lg font-mono text-sm break-all max-h-60 overflow-y-auto select-all">
                 {revealedSecret}
               </div>
-              <p className="text-xs text-muted-foreground">This secret will auto-hide in 15 seconds.</p>
+              <p className="text-xs text-muted-foreground">This secret is displayed in memory and will auto-hide in 15 seconds.</p>
               <DialogFooter>
                 <Button onClick={copyToClipboard}>
                   <Copy className="w-4 h-4 mr-2" />
@@ -133,7 +136,7 @@ export const CredentialsList = () => {
           ) : (
             <form onSubmit={submitUnlock} className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                This credential is encrypted in your vault. Enter your Master Password to reveal it.
+                The vault is currently locked. Enter your Master Password to decrypt this credential and start an active session.
               </p>
               <Input 
                 type="password" 
@@ -147,7 +150,7 @@ export const CredentialsList = () => {
                 <Button type="button" variant="outline" onClick={() => setActiveCred(null)}>Cancel</Button>
                 <Button type="submit" disabled={revealFlow.isPending || !promptPassword}>
                   {revealFlow.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Unlock
+                  Unlock & Reveal
                 </Button>
               </DialogFooter>
             </form>

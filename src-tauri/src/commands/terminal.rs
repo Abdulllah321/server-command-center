@@ -17,16 +17,32 @@ pub async fn open_terminal(
 
     let start = Instant::now();
 
-    // Re-use existing session from SessionManager, or connect if needed
-    let session_handle = state
-        .session_manager
-        .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
-        .await?;
+    // Re-use existing session from SessionManager, or connect if needed (with auto-reconnect on channel failure)
+    let (pty_id, mut rx) = {
+        let session_arc = state
+            .session_manager
+            .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+            .await?;
+            
+        let pty_res = {
+            let mut session_handle = session_arc.lock().await;
+            state.pty_manager.open_pty(&mut session_handle, cols, rows, None).await
+        };
         
-    let (pty_id, mut rx) = state
-        .pty_manager
-        .open_pty(session_handle, cols, rows, None)
-        .await?;
+        match pty_res {
+            Ok(res) => res,
+            Err(e) => {
+                log::warn!("Failed to open terminal PTY channel ({}), evicting session and reconnecting...", e);
+                state.session_manager.evict_session(&server_id).await;
+                let new_session_arc = state
+                    .session_manager
+                    .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+                    .await?;
+                let mut new_handle = new_session_arc.lock().await;
+                state.pty_manager.open_pty(&mut new_handle, cols, rows, None).await?
+            }
+        }
+    };
 
     let pty_id_clone = pty_id.clone();
     let app_handle_clone = app_handle.clone();

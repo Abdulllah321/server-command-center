@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "server-command-center",
-  "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "productName": "Server Command Center",
+  "version": "1.0.0",
+  "identifier": "com.veyra.scc",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,11 +12,15 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Server Command Center",
-        "width": 800,
-        "height": 600,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "devtools": true
       }
     ],
     "security": {
@@ -25,16 +29,25 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "publisher": "Veyra",
+    "copyright": "Copyright © 2026 Veyra",
+    "category": "DeveloperTool",
+    "shortDescription": "Fast, lightweight multi-server management and command center.",
+    "longDescription": "Server Command Center by Veyra is a native desktop application for DevOps and system administrators to monitor server health, manage PM2 processes, trigger zero-downtime rebuild pipelines, stream logs, and access secure SSH terminals.",
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

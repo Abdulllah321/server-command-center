@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useHealth, HealthSnapshot } from '../api';
+import { useEffect, useState } from 'react';
+import { useHealth } from '../api';
 import { Cpu, HardDrive, MemoryStick, Clock, Activity, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -58,6 +58,24 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
     );
   }
 
+  if (isError && !data) {
+    if (variant === 'compact') {
+      return (
+        <div className="p-3 mt-3 rounded-lg border border-border/40 bg-secondary/10 text-xs text-muted-foreground flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+          <span>Metrics offline. Connect to view status.</span>
+        </div>
+      );
+    }
+    return (
+      <div className="p-8 border border-dashed rounded-xl bg-card/40 text-center flex flex-col items-center justify-center gap-2 text-muted-foreground">
+        <Activity className="h-8 w-8 text-muted-foreground/40 mb-1" />
+        <h3 className="text-sm font-medium text-foreground">Live Telemetry Suspended</h3>
+        <p className="text-xs max-w-sm">Connect and authenticate with the server to begin streaming real-time CPU, RAM, and Disk metrics.</p>
+      </div>
+    );
+  }
+
   const getStatusColor = (pct: number) => {
     if (pct > 90) return 'bg-red-500';
     if (pct > 70) return 'bg-yellow-500';
@@ -73,38 +91,67 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
 
   if (variant === 'compact') {
     return (
-      <div className={cn("mt-4 space-y-3 relative", isError && "opacity-60")}>
+      <div className={cn("grid grid-cols-3 gap-2.5 pt-1 relative", isError && "opacity-70")}>
         {isError && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/50 rounded backdrop-blur-[1px]">
-            <span className="text-xs text-destructive flex items-center font-medium bg-background px-2 py-1 rounded shadow"><AlertTriangle className="h-3 w-3 mr-1"/> Stale</span>
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60 rounded-xl backdrop-blur-[1px]">
+            <span className="text-xs text-amber-400 flex items-center font-medium bg-zinc-950 px-2.5 py-1 rounded-md border border-amber-500/20 shadow">
+              <AlertTriangle className="h-3 w-3 mr-1" /> Reconnecting
+            </span>
           </div>
         )}
-        
+
         {/* CPU */}
-        <div className="flex flex-col gap-1">
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3"/> CPU</span>
-            <span className="font-medium">{data?.cpu_pct.toFixed(1)}%</span>
+        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
+            <span className="flex items-center gap-1">
+              <Cpu className="h-3 w-3 text-blue-400" /> CPU
+            </span>
           </div>
-          <ProgressBar pct={data?.cpu_pct || 0} colorClass={getStatusColor(data?.cpu_pct || 0)} />
+          <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
+            {data ? `${data.cpu_pct.toFixed(1)}%` : '--'}
+          </div>
+          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+            <div 
+              className={cn("h-full transition-all duration-500", getStatusColor(data?.cpu_pct || 0))}
+              style={{ width: `${Math.min(data?.cpu_pct || 0, 100)}%` }}
+            />
+          </div>
         </div>
 
         {/* RAM */}
-        <div className="flex flex-col gap-1">
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-muted-foreground flex items-center gap-1"><MemoryStick className="h-3 w-3"/> RAM</span>
-            <span className="font-medium">{data?.ram_pct.toFixed(1)}%</span>
+        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
+            <span className="flex items-center gap-1">
+              <MemoryStick className="h-3 w-3 text-emerald-400" /> RAM
+            </span>
           </div>
-          <ProgressBar pct={data?.ram_pct || 0} colorClass={getStatusColor(data?.ram_pct || 0)} />
+          <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
+            {data ? `${data.ram_pct.toFixed(1)}%` : '--'}
+          </div>
+          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+            <div 
+              className={cn("h-full transition-all duration-500", getStatusColor(data?.ram_pct || 0))}
+              style={{ width: `${Math.min(data?.ram_pct || 0, 100)}%` }}
+            />
+          </div>
         </div>
 
         {/* Disk */}
-        <div className="flex flex-col gap-1">
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-muted-foreground flex items-center gap-1"><HardDrive className="h-3 w-3"/> Disk</span>
-            <span className="font-medium">{data?.disk_pct.toFixed(1)}%</span>
+        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
+            <span className="flex items-center gap-1">
+              <HardDrive className="h-3 w-3 text-purple-400" /> Disk
+            </span>
           </div>
-          <ProgressBar pct={data?.disk_pct || 0} colorClass={getStatusColor(data?.disk_pct || 0)} />
+          <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
+            {data ? `${data.disk_pct.toFixed(1)}%` : '--'}
+          </div>
+          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+            <div 
+              className={cn("h-full transition-all duration-500", getStatusColor(data?.disk_pct || 0))}
+              style={{ width: `${Math.min(data?.disk_pct || 0, 100)}%` }}
+            />
+          </div>
         </div>
       </div>
     );

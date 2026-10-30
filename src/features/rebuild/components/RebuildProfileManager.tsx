@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ArrowUp, ArrowDown, Plus, Trash2, Copy, Save } from 'lucide-react';
+import { toast } from 'sonner';
+import { showIpcError } from '@/lib/error-handler';
 import { 
-  RebuildProfile, 
-  RebuildStep,
+  type RebuildProfile, 
+  type RebuildStep,
   listProfiles, 
   createProfile, 
   updateProfile, 
@@ -33,8 +35,8 @@ export const RebuildProfileManager = () => {
         // Refresh selected
         selectProfile(selectedId, data);
       }
-    } catch (err) {
-      console.error("Failed to load profiles", err);
+    } catch (err: any) {
+      showIpcError(err, { action: 'Load Profiles' });
     }
   };
 
@@ -104,9 +106,9 @@ export const RebuildProfileManager = () => {
         await updateProfile(selectedId, { name, steps });
       }
       await loadProfiles();
-    } catch (err) {
-      console.error("Failed to save profile", err);
-      alert(String(err));
+      toast.success('Profile saved successfully');
+    } catch (err: any) {
+      showIpcError(err, { action: 'Save Profile' });
     }
   };
 
@@ -117,8 +119,9 @@ export const RebuildProfileManager = () => {
         await deleteProfile(selectedId);
         setSelectedId(null);
         await loadProfiles();
+        toast.success('Profile deleted successfully');
       } catch (err) {
-        alert(String(err));
+        showIpcError(err, { action: 'Delete Profile' });
       }
     }
   };

@@ -105,62 +105,73 @@ pub async fn create_server(state: tauri::State<'_, AppState>, server: ServerPayl
     let start = Instant::now();
     let id = Uuid::new_v4().to_string();
 
-    let mut conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
-    
-    let tx = conn.transaction()?;
+    {
+        let mut conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
+        let tx = conn.transaction()?;
 
-    let res = (|| -> Result<(), rusqlite::Error> {
-        tx.execute(
-            "INSERT INTO servers (id, name, hostname, ssh_port, username, os, provider, environment, description, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), datetime('now'))",
-            rusqlite::params![
-                &id,
-                &server.name,
-                &server.hostname,
-                &server.ssh_port,
-                &server.username,
-                &server.os,
-                &server.provider,
-                &server.environment,
-                &server.description
-            ],
-        )?;
-
-        for tag in &server.tags {
+        let res = (|| -> Result<(), rusqlite::Error> {
             tx.execute(
-                "INSERT INTO server_tags (server_id, tag) VALUES (?1, ?2)",
-                rusqlite::params![&id, tag],
+                "INSERT INTO servers (id, name, hostname, ssh_port, username, os, provider, environment, description, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), datetime('now'))",
+                rusqlite::params![
+                    &id,
+                    &server.name,
+                    &server.hostname,
+                    &server.ssh_port,
+                    &server.username,
+                    &server.os,
+                    &server.provider,
+                    &server.environment,
+                    &server.description
+                ],
             )?;
+
+            for tag in &server.tags {
+                tx.execute(
+                    "INSERT INTO server_tags (server_id, tag) VALUES (?1, ?2)",
+                    rusqlite::params![&id, tag],
+                )?;
+            }
+            
+            Ok(())
+        })();
+
+        let status = if res.is_ok() { "success" } else { "failed" };
+        let detail = res.as_ref().err().map(|e| e.to_string());
+
+        if res.is_ok() {
+            tx.commit()?;
+
+            // If the host key was verified during "Test Connection", pin it permanently for this server
+            let host_key_addr = format!("{}:{}", server.hostname, server.ssh_port);
+            let cached_fp = {
+                let trusted = state.session_manager.trusted_host_keys.lock().ok();
+                trusted.and_then(|t| t.get(&host_key_addr).cloned())
+            };
+            if let Some(fp) = cached_fp {
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO known_hosts (server_id, fingerprint, created_at) VALUES (?1, ?2, datetime('now'))",
+                    rusqlite::params![&id, fp],
+                );
+            }
+        } else {
+            let _ = tx.rollback();
         }
         
-        Ok(())
-    })();
+        // Audit log
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(id.clone()),
+            action: "create_server".into(),
+            target: Some(server.name.clone()),
+            status: status.into(),
+            detail,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
 
-    let status = if res.is_ok() { "success" } else { "failed" };
-    let detail = res.as_ref().err().map(|e| e.to_string());
-
-    if res.is_ok() {
-        tx.commit()?;
-    } else {
-        let _ = tx.rollback();
+        if status == "failed" {
+            return Err(CommandError::Database("Failed to create server".into()));
+        }
     }
-    
-    // Audit log
-    log_activity(&conn, ActivityEntry {
-        server_id: Some(id.clone()),
-        action: "create_server".into(),
-        target: Some(server.name.clone()),
-        status: status.into(),
-        detail,
-        duration_ms: Some(start.elapsed().as_millis() as i64),
-    });
-
-    if status == "failed" {
-        return Err(CommandError::Database("Failed to create server".into()));
-    }
-    
-    // Drop the lock so get_server can re-acquire it
-    drop(conn);
 
     get_server(state, id).await
 }
@@ -172,76 +183,81 @@ pub async fn update_server(state: tauri::State<'_, AppState>, id: String, update
     }
 
     let start = Instant::now();
-    let mut conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
-    
-    let tx = conn.transaction()?;
 
-    let res = (|| -> Result<(), rusqlite::Error> {
-        if let Some(name) = &updates.name {
-            tx.execute("UPDATE servers SET name = ?1, updated_at = datetime('now') WHERE id = ?2", [&name, &id])?;
-        }
-        if let Some(hostname) = &updates.hostname {
-            tx.execute("UPDATE servers SET hostname = ?1, updated_at = datetime('now') WHERE id = ?2", [&hostname, &id])?;
-        }
-        if let Some(ssh_port) = updates.ssh_port {
-            tx.execute("UPDATE servers SET ssh_port = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![ssh_port, &id])?;
-        }
-        if let Some(username) = &updates.username {
-            tx.execute("UPDATE servers SET username = ?1, updated_at = datetime('now') WHERE id = ?2", [&username, &id])?;
-        }
-        if let Some(os) = &updates.os {
-            tx.execute("UPDATE servers SET os = ?1, updated_at = datetime('now') WHERE id = ?2", [&os, &id])?;
-        }
-        if let Some(provider) = &updates.provider {
-            tx.execute("UPDATE servers SET provider = ?1, updated_at = datetime('now') WHERE id = ?2", [&provider, &id])?;
-        }
-        if let Some(env) = &updates.environment {
-            tx.execute("UPDATE servers SET environment = ?1, updated_at = datetime('now') WHERE id = ?2", [&env, &id])?;
-        }
-        if let Some(desc) = &updates.description {
-            tx.execute("UPDATE servers SET description = ?1, updated_at = datetime('now') WHERE id = ?2", [&desc, &id])?;
-        }
+    {
+        let mut conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
+        let tx = conn.transaction()?;
 
-        if let Some(tags) = &updates.tags {
-            tx.execute("DELETE FROM server_tags WHERE server_id = ?1", [&id])?;
-            for tag in tags {
-                tx.execute("INSERT INTO server_tags (server_id, tag) VALUES (?1, ?2)", rusqlite::params![&id, tag])?;
+        let res = (|| -> Result<(), rusqlite::Error> {
+            if let Some(name) = &updates.name {
+                tx.execute("UPDATE servers SET name = ?1, updated_at = datetime('now') WHERE id = ?2", [&name, &id])?;
             }
+            if let Some(hostname) = &updates.hostname {
+                tx.execute("UPDATE servers SET hostname = ?1, updated_at = datetime('now') WHERE id = ?2", [&hostname, &id])?;
+            }
+            if let Some(ssh_port) = updates.ssh_port {
+                tx.execute("UPDATE servers SET ssh_port = ?1, updated_at = datetime('now') WHERE id = ?2", rusqlite::params![ssh_port, &id])?;
+            }
+            if let Some(username) = &updates.username {
+                tx.execute("UPDATE servers SET username = ?1, updated_at = datetime('now') WHERE id = ?2", [&username, &id])?;
+            }
+            if let Some(os) = &updates.os {
+                tx.execute("UPDATE servers SET os = ?1, updated_at = datetime('now') WHERE id = ?2", [&os, &id])?;
+            }
+            if let Some(provider) = &updates.provider {
+                tx.execute("UPDATE servers SET provider = ?1, updated_at = datetime('now') WHERE id = ?2", [&provider, &id])?;
+            }
+            if let Some(env) = &updates.environment {
+                tx.execute("UPDATE servers SET environment = ?1, updated_at = datetime('now') WHERE id = ?2", [&env, &id])?;
+            }
+            if let Some(desc) = &updates.description {
+                tx.execute("UPDATE servers SET description = ?1, updated_at = datetime('now') WHERE id = ?2", [&desc, &id])?;
+            }
+
+            if let Some(tags) = &updates.tags {
+                tx.execute("DELETE FROM server_tags WHERE server_id = ?1", [&id])?;
+                for tag in tags {
+                    tx.execute("INSERT INTO server_tags (server_id, tag) VALUES (?1, ?2)", rusqlite::params![&id, tag])?;
+                }
+            }
+            
+            Ok(())
+        })();
+
+        let status = if res.is_ok() { "success" } else { "failed" };
+        let detail = res.as_ref().err().map(|e| e.to_string());
+
+        if res.is_ok() {
+            tx.commit()?;
+        } else {
+            let _ = tx.rollback();
         }
         
-        Ok(())
-    })();
+        // Audit log
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(id.clone()),
+            action: "update_server".into(),
+            target: None,
+            status: status.into(),
+            detail,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
 
-    let status = if res.is_ok() { "success" } else { "failed" };
-    let detail = res.as_ref().err().map(|e| e.to_string());
-
-    if res.is_ok() {
-        tx.commit()?;
-    } else {
-        let _ = tx.rollback();
+        if status == "failed" {
+            return Err(CommandError::Database("Failed to update server".into()));
+        }
     }
-    
-    // Audit log
-    log_activity(&conn, ActivityEntry {
-        server_id: Some(id.clone()),
-        action: "update_server".into(),
-        target: None,
-        status: status.into(),
-        detail,
-        duration_ms: Some(start.elapsed().as_millis() as i64),
-    });
-
-    if status == "failed" {
-        return Err(CommandError::Database("Failed to update server".into()));
-    }
-    
-    drop(conn);
 
     get_server(state, id).await
 }
 
 #[tauri::command]
-pub async fn delete_server(state: tauri::State<'_, AppState>, id: String) -> CommandResult<()> {
+pub async fn delete_server(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    confirmation_token: Option<String>,
+) -> CommandResult<()> {
+    crate::commands::confirmation::consume_token(confirmation_token.as_deref()).await?;
     if id.is_empty() {
         return Err(CommandError::Validation("Server ID cannot be empty".into()));
     }
@@ -250,6 +266,17 @@ pub async fn delete_server(state: tauri::State<'_, AppState>, id: String) -> Com
 
     let start = Instant::now();
     let conn = state.db.lock().map_err(|_| CommandError::Internal("Lock poisoned".into()))?;
+
+    // Clean up OS keychain secrets for this server before deleting DB records
+    if let Ok(mut stmt) = conn.prepare("SELECT auth_method, keychain_ref FROM credentials WHERE server_id = ?1") {
+        if let Ok(creds) = stmt.query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))) {
+            for (auth_method, keychain_ref) in creds.filter_map(Result::ok) {
+                if auth_method == "password" || auth_method == "ssh_agent" {
+                    let _ = crate::secrets::keychain::delete_secret(&keychain_ref);
+                }
+            }
+        }
+    }
     
     let res = conn.execute("DELETE FROM servers WHERE id = ?1", [&id]);
     
@@ -273,13 +300,10 @@ pub async fn delete_server(state: tauri::State<'_, AppState>, id: String) -> Com
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rusqlite::Connection;
-    use std::sync::Mutex;
-    use tauri::State;
 
     fn setup_in_memory_db() -> Connection {
-        let mut conn = Connection::open_in_memory().unwrap();
+        let conn = Connection::open_in_memory().unwrap();
         // create tables
         let init_sql = include_str!("../db/migrations/0001_init.sql");
         conn.execute_batch(init_sql).unwrap();

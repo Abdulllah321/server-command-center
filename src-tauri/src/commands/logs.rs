@@ -1,20 +1,12 @@
 use crate::AppState;
 use crate::error::{CommandError, CommandResult};
-use russh::ChannelMsg;
 use serde::Serialize;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
-use std::time::SystemTime;
 use std::path::PathBuf;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use regex::Regex;
-use std::collections::HashMap;
-use tokio::sync::mpsc;
-use crate::ssh::client::SshClientHandler;
-use russh::client::Handle;
 
 #[derive(Clone, Serialize)]
 struct LogLineEvent {
@@ -54,50 +46,39 @@ async fn get_logs_dir(app_handle: &AppHandle) -> Result<PathBuf, CommandError> {
     Ok(logs_dir)
 }
 
-async fn prune_old_log_sessions(app_handle: &AppHandle, state: &tauri::State<'_, AppState>, application_id: &str) {
-    let conn_guard = match state.db.lock() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-
-    // Keep only the last 10 sessions per application
-    let mut stmt = match conn_guard.prepare(
-        "SELECT id, file_path FROM log_sessions 
-         WHERE application_id = ?1 
-         ORDER BY started_at DESC 
-         LIMIT -1 OFFSET 10"
-    ) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-
-    let mut rows = match stmt.query(rusqlite::params![application_id]) {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-
-    let mut to_delete_ids = Vec::new();
-    while let Ok(Some(row)) = rows.next() {
-        let id: String = match row.get(0) {
-            Ok(i) => i,
-            Err(_) => continue,
-        };
-        let file_path: String = match row.get(1) {
-            Ok(p) => p,
-            Err(_) => continue,
+async fn prune_old_log_sessions(_app_handle: &AppHandle, state: &tauri::State<'_, AppState>, application_id: &str) {
+    let old_sessions: Vec<(String, String)> = {
+        let conn_guard = match state.db.lock() {
+            Ok(c) => c,
+            Err(_) => return,
         };
 
+        // Keep only the last 10 sessions per application
+        let mut stmt = match conn_guard.prepare(
+            "SELECT id, file_path FROM log_sessions 
+             WHERE application_id = ?1 
+             ORDER BY started_at DESC 
+             LIMIT -1 OFFSET 10"
+        ) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let rows = match stmt.query_map(rusqlite::params![application_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    for (id, file_path) in old_sessions {
         let _ = tokio::fs::remove_file(&file_path).await;
-        to_delete_ids.push(id);
-    }
-
-    // SQLite doesn't easily allow binding a list of IDs in a single simple query without dynamic construction,
-    // so we just loop for V1 cleanup
-    for id in to_delete_ids {
-        let _ = conn_guard.execute(
-            "DELETE FROM log_sessions WHERE id = ?1",
-            rusqlite::params![id]
-        );
+        if let Ok(conn) = state.db.lock() {
+            let _ = conn.execute("DELETE FROM log_sessions WHERE id = ?1", rusqlite::params![id]);
+        }
     }
 }
 
@@ -151,20 +132,34 @@ pub async fn open_log_stream(
     prune_old_log_sessions(&app_handle, &state, &application_id).await;
 
     // 4. Connect SSH and spawn reader task
-    let session_manager = {
-        let sm_guard = state.session_manager.lock().await;
-        sm_guard.clone()
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+
+    let cmd = if pm2_name.trim().is_empty() || pm2_name.trim() == "all" {
+        "pm2 logs --raw".to_string()
+    } else {
+        format!("pm2 logs {} --raw", pm2_name)
     };
-
-    let session = session_manager
-        .get_or_connect(server_id.clone(), state.clone(), app_handle.clone())
-        .await?;
-
-    let cmd = format!("pm2 logs {} --raw", pm2_name);
-    let (pty_id, mut rx) = state
-        .pty_manager
-        .open_pty(session, 80, 24, Some(&cmd))
-        .await?;
+    
+    let (pty_id, mut rx) = {
+        let pty_res = {
+            let mut session = session_arc.lock().await;
+            state.pty_manager.open_pty(&mut session, 80, 24, Some(&cmd)).await
+        };
+        match pty_res {
+            Ok(res) => res,
+            Err(e) => {
+                log::warn!("Failed to open log PTY channel ({}), evicting session and reconnecting...", e);
+                state.session_manager.evict_session(&server_id).await;
+                let new_session_arc = state.session_manager
+                    .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+                    .await?;
+                let mut new_session = new_session_arc.lock().await;
+                state.pty_manager.open_pty(&mut new_session, 80, 24, Some(&cmd)).await?
+            }
+        }
+    };
 
     // We store the pty_id as our session_id so close_log_stream can kill the PTY
     let session_id_clone = pty_id.clone();
@@ -211,16 +206,17 @@ pub async fn open_log_stream(
 
                     while let Some(idx) = buffer.find('\n') {
                         let line = buffer[..idx].to_string();
-                        buffer.remove_range(..=idx);
+                        buffer = buffer[(idx + 1)..].to_string();
                         
                         let clean_line = line.trim_end_matches('\r').to_string();
                         if clean_line.is_empty() { continue; }
 
-                        let level = determine_log_level(&clean_line);
+                        let scrubbed_line = crate::secrets::redact::redact_secrets(&clean_line);
+                        let level = determine_log_level(&scrubbed_line);
 
                         // Write to local file
                         if bytes_written < max_bytes {
-                            let line_bytes = format!("[{}] {}\n", level, clean_line);
+                            let line_bytes = format!("[{}] {}\n", level, scrubbed_line);
                             if let Ok(_) = file.write_all(line_bytes.as_bytes()).await {
                                 bytes_written += line_bytes.len();
                             }
@@ -230,7 +226,7 @@ pub async fn open_log_stream(
                         let _ = app_handle_clone.emit(&format!("logs://data:{}", session_id_clone), LogLineEvent {
                             session_id: session_id_clone.clone(),
                             level: level.to_string(),
-                            content: clean_line,
+                            content: scrubbed_line,
                         });
                     }
                 }
@@ -297,5 +293,5 @@ pub async fn read_log_session_file(
     let content = tokio::fs::read_to_string(&file_path)
         .await
         .map_err(|e| CommandError::Internal(format!("Failed to read log file: {}", e)))?;
-    Ok(content)
+    Ok(crate::secrets::redact::redact_secrets(&content))
 }

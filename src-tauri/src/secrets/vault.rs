@@ -55,11 +55,20 @@ struct VaultFile {
 
 /// A handle to an unlocked vault. 
 /// The `key` is wrapped in a type that automatically zeroes itself out when dropped.
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Clone)]
 pub struct VaultHandle {
     key: [u8; 32],
     #[zeroize(skip)]
     path: PathBuf,
+}
+
+impl std::fmt::Debug for VaultHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultHandle")
+            .field("key", &"[REDACTED]")
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 /// Derives a 32-byte AES key using Argon2id.

@@ -25,8 +25,6 @@ export const Sparkline: React.FC<SparklineProps> = ({
   // X values will be spaced evenly across `width`
   // Y values are mapped such that 100% = 0 (top of SVG), 0% = height (bottom)
 
-  const maxPoints = 180; // The theoretical max size of the buffer
-  
   // Calculate points
   const points = data.map((val, i) => {
     // If we have fewer than maxPoints, we still want to draw them starting from the left

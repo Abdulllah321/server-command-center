@@ -69,10 +69,23 @@ pub struct CredentialMetadataExtended {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CreateCredentialPayload {
     pub server_id: String,
     pub auth_method: String,
     pub secret_payload: String,
     pub key_fingerprint: Option<String>,
+    pub master_password: Option<String>,
+}
+
+impl std::fmt::Debug for CreateCredentialPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateCredentialPayload")
+            .field("server_id", &self.server_id)
+            .field("auth_method", &self.auth_method)
+            .field("secret_payload", &"***REDACTED***")
+            .field("key_fingerprint", &self.key_fingerprint)
+            .field("master_password", &"***REDACTED***")
+            .finish()
+    }
 }

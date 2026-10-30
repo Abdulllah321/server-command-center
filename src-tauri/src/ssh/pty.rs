@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
-use tauri::{AppHandle, Emitter};
 use serde::Serialize;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use russh::client::Handle;
 use crate::ssh::client::SshClientHandler;
 use crate::error::CommandError;
@@ -20,9 +18,14 @@ pub struct TerminalStatusEvent {
     pub pty_id: String,
 }
 
+enum PtyCommand {
+    Data(Vec<u8>),
+    Resize { cols: u32, rows: u32 },
+    Close,
+}
+
 pub struct PtyState {
-    pub session: Handle<SshClientHandler>,
-    pub channel_id: russh::ChannelId,
+    cmd_tx: mpsc::UnboundedSender<PtyCommand>,
 }
 
 #[derive(Clone)]
@@ -39,13 +42,12 @@ impl PtyManager {
 
     pub async fn open_pty(
         &self,
-        session: Handle<SshClientHandler>,
+        session: &mut Handle<SshClientHandler>,
         cols: u32,
         rows: u32,
         command: Option<&str>,
-    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<russh::ChannelMsg>), CommandError> {
-        let mut session_clone = session.clone();
-        let mut channel = session_clone.channel_open_session().await.map_err(|e| CommandError::Internal(format!("Failed to open channel: {}", e)))?;
+    ) -> Result<(String, mpsc::UnboundedReceiver<russh::ChannelMsg>), CommandError> {
+        let mut channel = session.channel_open_session().await.map_err(|e| CommandError::Internal(format!("Failed to open channel: {}", e)))?;
         
         channel.request_pty(false, "xterm-256color", cols, rows, 0, 0, &[]).await.map_err(|_| CommandError::Internal("Failed to request PTY".into()))?;
         
@@ -56,34 +58,53 @@ impl PtyManager {
         }
 
         let pty_id = Uuid::new_v4().to_string();
-        let channel_id = channel.id();
+        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<PtyCommand>();
         
         // Save the reference for write/resize
         {
             let mut ptys = self.ptys.lock().await;
             ptys.insert(pty_id.clone(), PtyState {
-                session: session.clone(),
-                channel_id,
+                cmd_tx,
             });
         }
 
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let pty_id_clone = pty_id.clone();
         let manager_clone = self.clone();
         
         tokio::spawn(async move {
-            while let Some(msg) = channel.wait().await {
-                // Determine if we should break early before forwarding
-                let is_end = matches!(msg, russh::ChannelMsg::Eof | russh::ChannelMsg::Close);
-                
-                if tx.send(msg).is_err() {
-                    break;
-                }
-
-                if is_end {
-                    break;
+            loop {
+                tokio::select! {
+                    msg_opt = channel.wait() => {
+                        match msg_opt {
+                            Some(msg) => {
+                                let is_end = matches!(msg, russh::ChannelMsg::Eof | russh::ChannelMsg::Close);
+                                if tx.send(msg).is_err() || is_end {
+                                    break;
+                                }
+                            }
+                            None => break,
+                        }
+                    }
+                    cmd_opt = cmd_rx.recv() => {
+                        match cmd_opt {
+                            Some(PtyCommand::Data(data)) => {
+                                let _ = channel.data(&data[..]).await;
+                            }
+                            Some(PtyCommand::Resize { cols, rows }) => {
+                                let _ = channel.window_change(cols, rows, 0, 0).await;
+                            }
+                            Some(PtyCommand::Close) | None => {
+                                let _ = channel.eof().await;
+                                let _ = channel.close().await;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
+
+            let _ = channel.close().await;
 
             // Cleanup when loop breaks
             let mut ptys = manager_clone.ptys.lock().await;
@@ -94,9 +115,9 @@ impl PtyManager {
     }
 
     pub async fn write(&self, pty_id: &str, data: &[u8]) -> Result<(), CommandError> {
-        let mut ptys = self.ptys.lock().await;
-        if let Some(state) = ptys.get_mut(pty_id) {
-            state.session.data(state.channel_id, data).await.map_err(|_| CommandError::Internal("Failed to write to channel".into()))?;
+        let ptys = self.ptys.lock().await;
+        if let Some(state) = ptys.get(pty_id) {
+            state.cmd_tx.send(PtyCommand::Data(data.to_vec())).map_err(|_| CommandError::Internal("PTY channel closed".into()))?;
             Ok(())
         } else {
             Err(CommandError::NotFound("PTY session not found".into()))
@@ -104,9 +125,9 @@ impl PtyManager {
     }
 
     pub async fn resize(&self, pty_id: &str, cols: u32, rows: u32) -> Result<(), CommandError> {
-        let mut ptys = self.ptys.lock().await;
-        if let Some(state) = ptys.get_mut(pty_id) {
-            state.session.window_change(state.channel_id, cols, rows, 0, 0).await.map_err(|_| CommandError::Internal("Failed to resize channel".into()))?;
+        let ptys = self.ptys.lock().await;
+        if let Some(state) = ptys.get(pty_id) {
+            state.cmd_tx.send(PtyCommand::Resize { cols, rows }).map_err(|_| CommandError::Internal("PTY channel closed".into()))?;
             Ok(())
         } else {
             Err(CommandError::NotFound("PTY session not found".into()))
@@ -115,9 +136,8 @@ impl PtyManager {
 
     pub async fn close(&self, pty_id: &str) -> Result<(), CommandError> {
         let mut ptys = self.ptys.lock().await;
-        if let Some(mut state) = ptys.remove(pty_id) {
-            let _ = state.session.eof(state.channel_id).await;
-            let _ = state.session.close(state.channel_id).await;
+        if let Some(state) = ptys.remove(pty_id) {
+            let _ = state.cmd_tx.send(PtyCommand::Close);
         }
         Ok(())
     }

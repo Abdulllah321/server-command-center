@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger 
 } from '@/components/ui/dialog';
@@ -7,12 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { 
-  Application, RebuildProfile, 
+  type Application, type RebuildProfile, 
   listApplications, createApplication, listProfiles, 
-  triggerRebuild, abortPipeline, RebuildStep
+  triggerRebuild, abortPipeline, type RebuildStep
 } from '@/lib/tauri-client';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { Play, Loader2, CheckCircle2, XCircle, AlertCircle, Rocket } from 'lucide-react';
+import { toast } from 'sonner';
+import { showIpcError } from '@/lib/error-handler';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { Loader2, CheckCircle2, XCircle, AlertCircle, Rocket } from 'lucide-react';
 
 interface RebuildWizardProps {
   serverId: string;
@@ -77,7 +79,8 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       } else {
         setIsNewApp(true);
       }
-    } catch (e) {
+    } catch (e: any) {
+      showIpcError(e, { action: 'Initialize Rebuild Wizard' });
       console.error(e);
     }
   };
@@ -89,7 +92,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       
       if (isNewApp) {
         if (!newAppName || !newAppProfile) {
-          alert('Name and Profile are required');
+          toast.error('Name and Profile are required');
           return;
         }
         const app = await createApplication({
@@ -115,13 +118,13 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       }
 
       if (!targetAppId || !targetProfileId) {
-        alert("Application must have an assigned Rebuild Profile");
+        toast.error("Application must have an assigned Rebuild Profile");
         return;
       }
 
       const prof = profiles.find(p => p.id === targetProfileId);
       if (!prof) {
-        alert("Selected profile not found");
+        toast.error("Selected profile not found");
         return;
       }
 
@@ -136,7 +139,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       setWizardStep('preview');
       
     } catch (e) {
-      alert(String(e));
+      showIpcError(e, { action: 'Prepare Deployment Preview' });
     }
   };
 
@@ -157,7 +160,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       const pid = await triggerRebuild(selectedAppId, resolvedProfile.id, retryFromStep);
       setPipelineId(pid);
     } catch (e) {
-      alert(String(e));
+      showIpcError(e, { action: 'Trigger Rebuild Pipeline' });
       setWizardStep('preview');
     }
   };
@@ -194,7 +197,8 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
     if (pipelineId) {
       try {
         await abortPipeline(pipelineId);
-      } catch (e) {
+      } catch (e: any) {
+        showIpcError(e, { action: 'Abort Pipeline' });
         console.error(e);
       }
     }
@@ -226,7 +230,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
                   <span className={applications.length === 0 ? "text-muted-foreground" : ""}>Existing Application</span>
                 </div>
                 {!isNewApp && (
-                  <Select value={selectedAppId || ''} onValueChange={setSelectedAppId}>
+                  <Select value={selectedAppId || ''} onValueChange={(val) => setSelectedAppId(val || '')}>
                     <SelectTrigger className="w-[250px]">
                       <SelectValue placeholder="Select App" />
                     </SelectTrigger>
@@ -261,7 +265,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
                       </div>
                       <div className="flex-1">
                         <label className="text-xs">Package Manager</label>
-                        <Select value={newAppPkg} onValueChange={setNewAppPkg}>
+                        <Select value={newAppPkg} onValueChange={(val) => setNewAppPkg(val || 'bun')}>
                           <SelectTrigger><SelectValue/></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="bun">bun</SelectItem>
@@ -278,7 +282,7 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
                     </div>
                     <div>
                       <label className="text-xs">Rebuild Profile</label>
-                      <Select value={newAppProfile} onValueChange={setNewAppProfile}>
+                      <Select value={newAppProfile} onValueChange={(val) => setNewAppProfile(val || '')}>
                         <SelectTrigger><SelectValue placeholder="Select Profile" /></SelectTrigger>
                         <SelectContent>
                           {profiles.map(p => (

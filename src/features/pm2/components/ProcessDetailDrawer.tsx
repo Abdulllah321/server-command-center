@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { Pm2Process } from '@/lib/tauri-client';
+import { useRef, useEffect } from 'react';
+import type { Pm2Process } from '@/lib/tauri-client';
 import { X, Play, Square, RotateCw, RefreshCw, Trash2, Terminal, FolderOpen, Loader2, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
