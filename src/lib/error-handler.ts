@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 export function formatErrorMessage(error: unknown, fallbackMessage = 'An unexpected error occurred'): string {
   if (!error) return fallbackMessage;
 
-  let rawMessage = '';
+  let rawMessage: string;
 
   if (typeof error === 'string') {
     rawMessage = error;

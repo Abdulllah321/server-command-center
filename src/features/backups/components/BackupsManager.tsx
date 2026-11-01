@@ -2,9 +2,33 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { listBackups, createBackup, restoreBackup, deleteBackup, requestConfirmation, type BackupRecord, type CreateBackupOptions } from '@/lib/tauri-client';
-import { Database, FolderArchive, RefreshCw, Trash2, RotateCcw, Plus, CheckCircle2, XCircle, HardDrive, Loader2, AlertTriangle } from 'lucide-react';
+import { 
+  listBackups, 
+  createBackup, 
+  restoreBackup, 
+  deleteBackup, 
+  downloadBackup, 
+  requestConfirmation, 
+  type BackupRecord, 
+  type CreateBackupOptions 
+} from '@/lib/tauri-client';
+import { 
+  Database, 
+  FolderArchive, 
+  RefreshCw, 
+  Trash2, 
+  RotateCcw, 
+  Plus, 
+  CheckCircle2, 
+  XCircle, 
+  HardDrive, 
+  Loader2, 
+  AlertTriangle,
+  Download,
+  Zap
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BackupsManagerProps {
@@ -19,11 +43,17 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const [selectedBackup, setSelectedBackup] = useState<BackupRecord | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Form State
   const [targetType, setTargetType] = useState<'postgres' | 'mysql' | 'redis' | 'directory' | 'custom'>('postgres');
   const [targetName, setTargetName] = useState('');
   const [destinationDir, setDestinationDir] = useState('/var/backups');
+  const [dbUser, setDbUser] = useState('');
+  const [dbPassword, setDbPassword] = useState('');
+  const [dbHost, setDbHost] = useState('');
+  const [dbPort, setDbPort] = useState('');
+  const [showAdvancedDb, setShowAdvancedDb] = useState(false);
   const [customCommand, setCustomCommand] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
 
@@ -43,8 +73,8 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
     loadBackups();
   }, [serverId]);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreate = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!targetName.trim()) {
       toast.error('Please specify a target database name or directory path');
       return;
@@ -56,6 +86,10 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
         target_type: targetType,
         target_name: targetName.trim(),
         destination_dir: destinationDir.trim() || undefined,
+        db_user: dbUser.trim() || undefined,
+        db_password: dbPassword.trim() || undefined,
+        db_host: dbHost.trim() || undefined,
+        db_port: dbPort ? parseInt(dbPort, 10) : undefined,
         custom_command: targetType === 'custom' ? customCommand.trim() : undefined,
       };
 
@@ -65,11 +99,45 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
       });
       setCreateModalOpen(false);
       setTargetName('');
+      setDbUser('');
+      setDbPassword('');
+      setDbHost('');
+      setDbPort('');
+      setShowAdvancedDb(false);
       loadBackups();
     } catch (err: any) {
       toast.error('Backup creation failed', { description: err.message || String(err) });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleQuickBackup = (type: 'postgres' | 'mysql' | 'redis', defaultName: string) => {
+    setTargetType(type);
+    setTargetName(defaultName);
+    setCreateModalOpen(true);
+  };
+
+  const handleDownload = async (backup: BackupRecord) => {
+    setDownloadingId(backup.id);
+    try {
+      const res = await downloadBackup(serverId, backup.id);
+      toast.success('Backup downloaded to your PC!', {
+        description: `Saved to: ${res.local_path} (${formatBytes(res.bytes_written)})`,
+        action: {
+          label: 'Copy Path',
+          onClick: () => {
+            navigator.clipboard.writeText(res.local_path);
+            toast.info('Local file path copied to clipboard');
+          },
+        },
+      });
+    } catch (err: any) {
+      toast.error('Failed to download backup', {
+        description: err.message || String(err),
+      });
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -82,10 +150,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
 
     setRestoring(true);
     try {
-      // 1. Obtain confirmation token
       const token = await requestConfirmation(`Restore backup ${selectedBackup.target} on server`, [serverId]);
-      
-      // 2. Perform restore
       await restoreBackup(serverId, selectedBackup.id, token);
       toast.success('Backup restored successfully', {
         description: `Restored ${selectedBackup.target} from ${selectedBackup.destination}`,
@@ -122,130 +187,266 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">Remote Backups</h2>
-          <p className="text-sm text-muted-foreground">
-            Automated database dumps and file archive snapshots directly over SSH.
+      {/* Top Deck Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl border border-border bg-card shadow-xs">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+              <HardDrive className="h-5 w-5" />
+            </div>
+            <h2 className="text-xl font-bold tracking-tight text-foreground">Live Database Backups & Snapshots</h2>
+            <Badge variant="outline" className="text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 border-indigo-500/30">
+              SSH Stream Download
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground max-w-2xl">
+            Execute automated live database dumps (pg_dump, mysqldump, redis bgsave) and download backup archives directly to your PC's Downloads folder.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={loadBackups} disabled={loading}>
+
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="border-border text-foreground hover:bg-accent"
+            onClick={loadBackups} 
+            disabled={loading}
+          >
             <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button size="sm" onClick={() => setCreateModalOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Backup
+          <Button 
+            size="sm" 
+            className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium shadow-sm"
+            onClick={() => {
+              setTargetType('postgres');
+              setTargetName('');
+              setCreateModalOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            New Backup
           </Button>
         </div>
       </div>
 
+      {/* Quick Dump Action Bar */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div 
+          onClick={() => handleQuickBackup('postgres', 'postgres')}
+          className="p-3.5 rounded-xl border border-blue-500/20 bg-blue-500/5 dark:bg-blue-950/15 hover:border-blue-500/40 hover:bg-blue-500/10 transition-all cursor-pointer flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-lg">
+              🐘
+            </div>
+            <div>
+              <div className="font-semibold text-sm text-foreground group-hover:text-blue-600 dark:group-hover:text-blue-300 transition-colors">
+                Dump PostgreSQL DB
+              </div>
+              <div className="text-xs text-muted-foreground font-mono">pg_dump | gzip</div>
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" className="text-xs text-blue-600 dark:text-blue-300 hover:text-foreground">
+            <Zap className="h-3.5 w-3.5 mr-1 text-blue-500" /> Dump
+          </Button>
+        </div>
+
+        <div 
+          onClick={() => handleQuickBackup('mysql', 'mysql')}
+          className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 dark:bg-amber-950/15 hover:border-amber-500/40 hover:bg-amber-500/10 transition-all cursor-pointer flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-lg">
+              🐬
+            </div>
+            <div>
+              <div className="font-semibold text-sm text-foreground group-hover:text-amber-600 dark:group-hover:text-amber-300 transition-colors">
+                Dump MySQL / MariaDB
+              </div>
+              <div className="text-xs text-muted-foreground font-mono">mysqldump | gzip</div>
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" className="text-xs text-amber-600 dark:text-amber-300 hover:text-foreground">
+            <Zap className="h-3.5 w-3.5 mr-1 text-amber-500" /> Dump
+          </Button>
+        </div>
+
+        <div 
+          onClick={() => handleQuickBackup('redis', 'dump.rdb')}
+          className="p-3.5 rounded-xl border border-red-500/20 bg-red-500/5 dark:bg-red-950/15 hover:border-red-500/40 hover:bg-red-500/10 transition-all cursor-pointer flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 text-lg">
+              ⚡
+            </div>
+            <div>
+              <div className="font-semibold text-sm text-foreground group-hover:text-red-600 dark:group-hover:text-red-300 transition-colors">
+                Snapshot Redis RDB
+              </div>
+              <div className="text-xs text-muted-foreground font-mono">bgsave + copy</div>
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" className="text-xs text-red-600 dark:text-red-300 hover:text-foreground">
+            <Zap className="h-3.5 w-3.5 mr-1 text-red-500" /> Dump
+          </Button>
+        </div>
+      </div>
+
+      {/* Backups List */}
       {backups.length === 0 && !loading ? (
-        <Card className="border-dashed">
+        <Card className="border-dashed border-border bg-card/40">
           <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <FolderArchive className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <h3 className="font-semibold text-lg">No backups found</h3>
+            <FolderArchive className="h-12 w-12 text-muted-foreground mb-3" />
+            <h3 className="font-semibold text-lg text-foreground">No backups found</h3>
             <p className="text-sm text-muted-foreground max-w-md mt-1 mb-4">
-              Create an automated dump for your PostgreSQL, MySQL, Redis databases, or application files.
+              Take a snapshot of your live PostgreSQL, MySQL, Redis databases, or application files. You can restore them anytime or download the archives to your local PC.
             </p>
-            <Button size="sm" onClick={() => setCreateModalOpen(true)}>
+            <Button 
+              size="sm" 
+              className="bg-indigo-600 hover:bg-indigo-500 text-white"
+              onClick={() => setCreateModalOpen(true)}
+            >
               <Plus className="h-4 w-4 mr-2" /> Create First Backup
             </Button>
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4">
-          {backups.map(b => (
-            <Card key={b.id} className="overflow-hidden hover:border-primary/50 transition-colors">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-primary/10 text-primary rounded-lg">
-                    {b.destination.includes('pg_') || b.destination.includes('mysql_') || b.destination.includes('redis_') ? (
-                      <Database className="h-6 w-6" />
-                    ) : (
-                      <FolderArchive className="h-6 w-6" />
-                    )}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-base">{b.target}</span>
-                      {b.status === 'success' ? (
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-medium">
-                          <CheckCircle2 className="h-3 w-3" /> Ready
-                        </span>
+        <div className="grid grid-cols-1 gap-3.5">
+          {backups.map(b => {
+            const isDownloading = downloadingId === b.id;
+
+            return (
+              <Card 
+                key={b.id} 
+                className="overflow-hidden border border-border bg-card hover:border-primary/30 transition-all shadow-xs"
+              >
+                <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  {/* Left Metadata */}
+                  <div className="flex items-center gap-3.5">
+                    <div className="p-3 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-xl shrink-0">
+                      {b.destination.includes('pg_') || b.destination.includes('mysql_') || b.destination.includes('redis_') ? (
+                        <Database className="h-6 w-6" />
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">
-                          <XCircle className="h-3 w-3" /> Failed
-                        </span>
+                        <FolderArchive className="h-6 w-6" />
                       )}
                     </div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-3 mt-1 font-mono">
-                      <span>{b.destination}</span>
-                      <span>•</span>
-                      <span>{b.size_bytes ? formatBytes(b.size_bytes) : 'Size unknown'}</span>
-                      <span>•</span>
-                      <span>{new Date(b.created_at).toLocaleString()}</span>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-base text-foreground">{b.target}</span>
+                        {b.status === 'success' && (b.size_bytes && b.size_bytes <= 40) ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-medium" title="Dump produced 0 data bytes">
+                            <AlertTriangle className="h-3 w-3" /> Empty (0 B)
+                          </span>
+                        ) : b.status === 'success' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                            <CheckCircle2 className="h-3 w-3" /> Ready
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-medium">
+                            <XCircle className="h-3 w-3" /> Failed
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-2 font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground">
+                          {b.destination}
+                        </span>
+                        <span className="text-muted-foreground/60">•</span>
+                        <span className={`font-semibold ${b.size_bytes && b.size_bytes <= 40 ? 'text-amber-600 dark:text-amber-400' : 'text-teal-600 dark:text-teal-400'}`}>
+                          {b.size_bytes ? (b.size_bytes <= 40 ? '20 B (Empty dump)' : formatBytes(b.size_bytes)) : 'Size unknown'}
+                        </span>
+                        <span className="text-muted-foreground/60">•</span>
+                        <span className="text-muted-foreground font-sans">{new Date(b.created_at).toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-amber-500 hover:text-amber-600 hover:bg-amber-500/10"
-                    onClick={() => {
-                      setSelectedBackup(b);
-                      setConfirmInput('');
-                      setRestoreModalOpen(true);
-                    }}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-1.5" />
-                    Restore
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:bg-destructive/10"
-                    onClick={() => handleDelete(b)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  {/* Actions Deck */}
+                  <div className="flex items-center flex-wrap gap-2 self-end md:self-center">
+                    {/* Download to Local PC */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs border-teal-500/30 bg-teal-500/5 dark:bg-teal-950/20 text-teal-700 dark:text-teal-300 hover:bg-teal-500/15"
+                      disabled={isDownloading || b.status !== 'success'}
+                      onClick={() => handleDownload(b)}
+                    >
+                      {isDownloading ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      {isDownloading ? 'Downloading...' : 'Download to PC'}
+                    </Button>
+
+                    {/* Restore */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs text-amber-400 hover:text-amber-300 border-amber-500/30 hover:bg-amber-500/10"
+                      onClick={() => {
+                        setSelectedBackup(b);
+                        setConfirmInput('');
+                        setRestoreModalOpen(true);
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                      Restore
+                    </Button>
+
+                    {/* Delete */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
+                      onClick={() => handleDelete(b)}
+                      title="Delete Backup"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
       {/* Create Backup Modal */}
       <Dialog open={createModalOpen} onOpenChange={setCreateModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
           <DialogHeader>
-            <DialogTitle>Create Remote Backup</DialogTitle>
-            <DialogDescription>
-              Execute an automated backup dump on this server.
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <HardDrive className="h-5 w-5 text-indigo-500 dark:text-indigo-400" />
+              Create Live Server Backup
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground text-xs">
+              Execute a live database dump or directory snapshot directly on this server.
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handleCreate} className="space-y-4">
+          <form onSubmit={handleCreate} className="space-y-4 pt-2">
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Target Type</label>
+              <label className="text-xs font-medium text-foreground">Target Type</label>
               <div className="grid grid-cols-2 gap-2 mt-1.5">
                 {[
-                  { id: 'postgres', label: 'PostgreSQL DB' },
-                  { id: 'mysql', label: 'MySQL DB' },
-                  { id: 'redis', label: 'Redis RDB' },
-                  { id: 'directory', label: 'File Directory' },
-                  { id: 'custom', label: 'Custom Command' },
+                  { id: 'postgres', label: '🐘 PostgreSQL DB' },
+                  { id: 'mysql', label: '🐬 MySQL DB' },
+                  { id: 'redis', label: '⚡ Redis RDB' },
+                  { id: 'directory', label: '📁 Directory Archive' },
+                  { id: 'custom', label: '⚙️ Custom Command' },
                 ].map(t => (
                   <Button
                     key={t.id}
                     type="button"
                     variant={targetType === t.id ? 'default' : 'outline'}
                     size="sm"
-                    className="justify-start text-xs"
+                    className={`justify-start text-xs h-8 ${
+                      targetType === t.id 
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-500' 
+                        : 'border-border bg-background text-foreground hover:bg-accent'
+                    }`}
                     onClick={() => setTargetType(t.id as any)}
                   >
                     {t.label}
@@ -255,47 +456,117 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
             </div>
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground">
+              <label className="text-xs font-medium text-foreground">
                 {targetType === 'directory' ? 'Absolute Directory Path' : 'Database / Service Name'}
               </label>
               <Input
-                placeholder={targetType === 'directory' ? '/var/www/my-app' : 'production_db'}
+                placeholder={
+                  targetType === 'directory' 
+                    ? '/var/www/my-app' 
+                    : targetType === 'postgres' 
+                      ? 'e.g. tenant_speed_main_mox1gfsi' 
+                      : targetType === 'mysql' 
+                        ? 'e.g. my_database' 
+                        : 'dump.rdb'
+                }
                 value={targetName}
                 onChange={e => setTargetName(e.target.value)}
                 required
-                className="mt-1"
+                className="mt-1 bg-background border-input text-foreground text-xs font-mono"
               />
+              {targetType === 'postgres' && (
+                <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
+                  💡 <span className="text-foreground">Auto-connection:</span> Defaults to <code className="text-indigo-600 dark:text-indigo-300 bg-muted px-1 py-0.5 rounded font-mono border border-border">postgres</code> superuser via peer socket auth or auto-detects running PostgreSQL Docker containers.
+                </p>
+              )}
             </div>
+
+            {(targetType === 'postgres' || targetType === 'mysql') && (
+              <div className="border border-border bg-muted/40 rounded-xl p-3 space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedDb(!showAdvancedDb)}
+                  className="text-xs font-medium text-foreground hover:text-primary flex items-center justify-between w-full transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span>⚙️</span>
+                    <span>Advanced DB Connection Credentials (Optional)</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">{showAdvancedDb ? '▲ Hide' : '▼ Configure'}</span>
+                </button>
+                {showAdvancedDb && (
+                  <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-border">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Database User</label>
+                      <Input
+                        placeholder={targetType === 'postgres' ? 'postgres' : 'root'}
+                        value={dbUser}
+                        onChange={e => setDbUser(e.target.value)}
+                        className="mt-1 h-8 text-xs bg-background border-input text-foreground font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Database Password</label>
+                      <Input
+                        type="password"
+                        placeholder="••••••••"
+                        value={dbPassword}
+                        onChange={e => setDbPassword(e.target.value)}
+                        className="mt-1 h-8 text-xs bg-background border-input text-foreground font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Host (default: localhost)</label>
+                      <Input
+                        placeholder="127.0.0.1"
+                        value={dbHost}
+                        onChange={e => setDbHost(e.target.value)}
+                        className="mt-1 h-8 text-xs bg-background border-input text-foreground font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Port</label>
+                      <Input
+                        placeholder={targetType === 'postgres' ? '5432' : '3306'}
+                        value={dbPort}
+                        onChange={e => setDbPort(e.target.value)}
+                        className="mt-1 h-8 text-xs bg-background border-input text-foreground font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {targetType === 'custom' && (
               <div>
-                <label className="text-xs font-medium text-muted-foreground">Custom Backup Command (Use {"{{dest}}"} for output file)</label>
+                <label className="text-xs font-medium text-foreground">Custom Backup Command (Use {"{{dest}}"} for output file)</label>
                 <Input
                   placeholder="docker exec -t db_container pg_dump -U user db | gzip > {{dest}}"
                   value={customCommand}
                   onChange={e => setCustomCommand(e.target.value)}
-                  className="mt-1 font-mono text-xs"
+                  className="mt-1 font-mono text-xs bg-background border-input text-foreground"
                 />
               </div>
             )}
 
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Remote Destination Directory</label>
+              <label className="text-xs font-medium text-foreground">Remote Destination Directory</label>
               <Input
                 placeholder="/var/backups"
                 value={destinationDir}
                 onChange={e => setDestinationDir(e.target.value)}
-                className="mt-1 font-mono text-xs"
+                className="mt-1 font-mono text-xs bg-background border-input text-foreground"
               />
             </div>
 
-            <DialogFooter className="mt-6">
-              <Button type="button" variant="ghost" onClick={() => setCreateModalOpen(false)}>
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="ghost" onClick={() => setCreateModalOpen(false)} className="text-muted-foreground hover:text-foreground">
                 Cancel
               </Button>
-              <Button type="submit" disabled={creating}>
+              <Button type="submit" disabled={creating} className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium">
                 {creating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <HardDrive className="h-4 w-4 mr-2" />}
-                Run Backup
+                Run Live Dump
               </Button>
             </DialogFooter>
           </form>
@@ -304,39 +575,40 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
 
       {/* Restore Confirmation Modal */}
       <Dialog open={restoreModalOpen} onOpenChange={setRestoreModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
           <DialogHeader>
-            <div className="flex items-center gap-2 text-destructive font-semibold">
+            <div className="flex items-center gap-2 text-rose-500 dark:text-rose-400 font-semibold">
               <AlertTriangle className="h-5 w-5" />
               <span>Confirm Destructive Restore</span>
             </div>
-            <DialogDescription className="pt-2">
+            <DialogDescription className="pt-2 text-muted-foreground text-xs">
               Restoring <span className="font-semibold text-foreground">{selectedBackup?.target}</span> from{' '}
-              <span className="font-mono text-xs text-foreground">{selectedBackup?.destination}</span> will overwrite existing
+              <span className="font-mono text-xs text-teal-600 dark:text-teal-300">{selectedBackup?.destination}</span> will overwrite existing
               data on the server.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 my-2">
             <p className="text-xs text-muted-foreground">
-              To prevent accidental data loss, please type <strong className="text-destructive font-mono">RESTORE</strong> below to proceed:
+              To prevent accidental data loss, please type <strong className="text-rose-500 dark:text-rose-400 font-mono">RESTORE</strong> below to proceed:
             </p>
             <Input
               value={confirmInput}
               onChange={e => setConfirmInput(e.target.value)}
               placeholder="Type RESTORE to confirm"
-              className="font-mono text-center font-bold tracking-widest"
+              className="font-mono text-center font-bold tracking-widest bg-background border-rose-500/30 text-rose-600 dark:text-rose-300"
             />
           </div>
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRestoreModalOpen(false)} disabled={restoring}>
+            <Button variant="ghost" onClick={() => setRestoreModalOpen(false)} disabled={restoring} className="text-muted-foreground hover:text-foreground">
               Cancel
             </Button>
             <Button
               variant="destructive"
               onClick={handleRestore}
               disabled={confirmInput !== 'RESTORE' || restoring}
+              className="bg-red-600 hover:bg-red-500 text-white"
             >
               {restoring ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
               Confirm Restore

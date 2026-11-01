@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -64,12 +64,32 @@ export const testDirectConnection = async (payload: DirectTestConnectionPayload)
 };
 
 // Credentials Vault
+export const isVaultInitialized = async (): Promise<boolean> => {
+  return await invoke('is_vault_initialized');
+};
+
 export const unlockVault = async (password: string): Promise<boolean> => {
   return await invoke('unlock_vault', { password });
 };
 
 export const setupVault = async (password: string): Promise<void> => {
   return await invoke('setup_vault', { password });
+};
+
+export const checkWindowsHello = async (): Promise<WindowsHelloStatus> => {
+  return await invoke('check_windows_hello');
+};
+
+export const enableWindowsHello = async (password: string): Promise<boolean> => {
+  return await invoke('enable_windows_hello', { password });
+};
+
+export const disableWindowsHello = async (): Promise<void> => {
+  return await invoke('disable_windows_hello');
+};
+
+export const unlockVaultWithWindowsHello = async (): Promise<string> => {
+  return await invoke('unlock_vault_with_windows_hello');
 };
 
 // PM2 & Applications
@@ -313,6 +333,10 @@ export interface CreateBackupOptions {
   target_type: string;
   target_name: string;
   destination_dir?: string;
+  db_user?: string;
+  db_password?: string;
+  db_host?: string;
+  db_port?: number;
   custom_command?: string;
 }
 
@@ -330,6 +354,74 @@ export const restoreBackup = async (serverId: string, backupId: string, confirma
 
 export const deleteBackup = async (serverId: string, backupId: string): Promise<void> => {
   return await invoke('delete_backup', { serverId, backupId });
+};
+
+export interface DownloadBackupResult {
+  local_path: string;
+  bytes_written: number;
+}
+
+export const downloadBackup = async (
+  serverId: string,
+  backupId: string,
+  targetLocalDir?: string
+): Promise<DownloadBackupResult> => {
+  return await invoke('download_backup', {
+    serverId,
+    backupId,
+    targetLocalDir: targetLocalDir ?? null,
+  });
+};
+
+// Port Tunnels & Local Forwarding
+export interface PortTunnelInfo {
+  id: string;
+  server_id: string;
+  server_name?: string;
+  name: string;
+  local_port: number;
+  remote_host: string;
+  remote_port: number;
+  status: 'active' | 'stopped' | 'error';
+  created_at: string;
+}
+
+export const startPortTunnel = async (
+  serverId: string,
+  name: string,
+  localPort: number,
+  remoteHost: string,
+  remotePort: number
+): Promise<PortTunnelInfo> => {
+  return await invoke('start_port_tunnel', {
+    serverId,
+    name,
+    localPort,
+    remoteHost,
+    remotePort,
+  });
+};
+
+export const stopPortTunnel = async (tunnelId: string): Promise<void> => {
+  return await invoke('stop_port_tunnel', { tunnelId });
+};
+
+export const listActiveTunnels = async (serverId?: string): Promise<PortTunnelInfo[]> => {
+  return await invoke('list_active_tunnels', { serverId: serverId ?? null });
+};
+
+export const getTunnelCliCommand = async (
+  serverId: string,
+  localPort: number,
+  remoteHost: string,
+  remotePort: number
+): Promise<string> => {
+  return await invoke('get_tunnel_cli_command', {
+    serverId,
+    localPort,
+    remoteHost,
+    remotePort,
+  });
 };
 
 // Nginx & Reverse Proxy
@@ -377,6 +469,92 @@ export const reloadNginx = async (serverId: string): Promise<void> => {
 
 export const getSslCertificates = async (serverId: string): Promise<SslCertificate[]> => {
   return await invoke('get_ssl_certificates', { serverId });
+};
+
+export interface CertRenewalResult {
+  success: boolean;
+  output: string;
+}
+
+export const renewSslCertificates = async (serverId: string, dryRun: boolean): Promise<CertRenewalResult> => {
+  return await invoke('renew_ssl_certificates', { serverId, dryRun });
+};
+
+// Security Audit & Port Scanner
+export interface ListeningPort {
+  protocol: string;
+  local_port: number;
+  bind_address: string;
+  process_name: string;
+  pid: number | null;
+  is_public: boolean;
+  risk_level: 'safe' | 'normal' | 'high';
+  risk_description: string;
+}
+
+export interface UfwRule {
+  number: number;
+  to_port: string;
+  action: string;
+  from_ip: string;
+}
+
+export interface UfwStatus {
+  is_installed: boolean;
+  is_active: boolean;
+  default_incoming: string;
+  default_outgoing: string;
+  rules: UfwRule[];
+}
+
+export interface SecurityRecommendation {
+  severity: 'critical' | 'warning' | 'info' | 'good';
+  title: string;
+  description: string;
+}
+
+export interface SshHardeningAudit {
+  permit_root_login: string;
+  password_authentication: string;
+  port: number;
+  pubkey_authentication: string;
+  max_auth_tries: number;
+  score: number;
+  recommendations: SecurityRecommendation[];
+}
+
+export interface SecurityOverview {
+  fail2ban_active: boolean;
+  banned_ips_count: number;
+  pending_security_updates: number;
+  total_listening_ports: number;
+  public_ports_count: number;
+  high_risk_ports_count: number;
+  firewall_active: boolean;
+  ssh_score: number;
+}
+
+export interface SecurityAuditReport {
+  ports: ListeningPort[];
+  ufw: UfwStatus;
+  ssh: SshHardeningAudit;
+  overview: SecurityOverview;
+}
+
+export const getSecurityAudit = async (serverId: string): Promise<SecurityAuditReport> => {
+  return await invoke('get_security_audit', { serverId });
+};
+
+export const toggleUfw = async (serverId: string, enable: boolean): Promise<string> => {
+  return await invoke('toggle_ufw', { serverId, enable });
+};
+
+export const addUfwRule = async (serverId: string, port: string, allow: boolean, proto?: string): Promise<string> => {
+  return await invoke('add_ufw_rule', { serverId, port, allow, proto });
+};
+
+export const deleteUfwRule = async (serverId: string, ruleNumber: number): Promise<string> => {
+  return await invoke('delete_ufw_rule', { serverId, ruleNumber });
 };
 
 // Threshold Alerts
@@ -441,3 +619,93 @@ export const evaluateHealthAlerts = async (payload: {
     },
   });
 };
+
+// ── Scheduled Rebuilds & Deployments ─────────────────────────────
+export interface ScheduledRebuild {
+  id: string;
+  server_id: string;
+  application_id?: string;
+  app_name: string;
+  service_type: 'frontend' | 'backend' | 'both' | 'custom';
+  mode: 'zero_downtime' | 'direct';
+  profile_id?: string;
+  scheduled_for: string;
+  recurring?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  last_run_at?: string;
+  last_log?: string;
+  created_at: string;
+}
+
+export interface ScheduleRebuildOptions {
+  server_id: string;
+  application_id?: string;
+  app_name: string;
+  service_type: 'frontend' | 'backend' | 'both' | 'custom';
+  mode: 'zero_downtime' | 'direct';
+  profile_id?: string;
+  scheduled_for: string;
+  recurring?: string;
+}
+
+export const scheduleRebuild = async (opts: ScheduleRebuildOptions): Promise<ScheduledRebuild> => {
+  return await invoke('schedule_rebuild', { opts });
+};
+
+export const listScheduledRebuilds = async (serverId?: string): Promise<ScheduledRebuild[]> => {
+  return await invoke('list_scheduled_rebuilds', { serverId: serverId ?? null });
+};
+
+export const cancelScheduledRebuild = async (id: string): Promise<void> => {
+  return await invoke('cancel_scheduled_rebuild', { id });
+};
+
+export const runScheduledRebuildNow = async (id: string): Promise<string> => {
+  return await invoke('run_scheduled_rebuild_now', { id });
+};
+
+// Remote File Manager (FileZilla Style - Zero Server RAM)
+export const listRemoteFiles = async (serverId: string, path?: string): Promise<RemoteDirectoryListing> => {
+  return await invoke('list_remote_files', { serverId, path: path ?? null });
+};
+
+export const readRemoteFileContent = async (serverId: string, path: string, maxBytes?: number): Promise<RemoteFileContent> => {
+  return await invoke('read_remote_file_content', { serverId, path, maxBytes: maxBytes ?? null });
+};
+
+export const writeRemoteFileContent = async (serverId: string, path: string, content: string, createBackup = false): Promise<void> => {
+  return await invoke('write_remote_file_content', { serverId, path, content, createBackup });
+};
+
+export const downloadRemoteFile = async (serverId: string, path: string): Promise<DownloadedFilePayload> => {
+  return await invoke('download_remote_file', { serverId, path });
+};
+
+export const uploadRemoteFile = async (serverId: string, remoteDir: string, filename: string, base64Content: string): Promise<void> => {
+  return await invoke('upload_remote_file', { serverId, remoteDir, filename, base64Content });
+};
+
+export const createRemoteDirectory = async (serverId: string, path: string): Promise<void> => {
+  return await invoke('create_remote_directory', { serverId, path });
+};
+
+export const createRemoteFile = async (serverId: string, path: string): Promise<void> => {
+  return await invoke('create_remote_file', { serverId, path });
+};
+
+export const renameRemotePath = async (serverId: string, oldPath: string, newPath: string): Promise<void> => {
+  return await invoke('rename_remote_path', { serverId, oldPath, newPath });
+};
+
+export const deleteRemotePaths = async (serverId: string, paths: string[], recursive: boolean, confirmationToken: string): Promise<void> => {
+  return await invoke('delete_remote_paths', { serverId, paths, recursive, confirmationToken });
+};
+
+export const changeRemotePermissions = async (serverId: string, path: string, mode: string, recursive: boolean): Promise<void> => {
+  return await invoke('change_remote_permissions', { serverId, path, mode, recursive });
+};
+
+export const searchRemoteFiles = async (serverId: string, path: string, query: string): Promise<RemoteFileEntry[]> => {
+  return await invoke('search_remote_files', { serverId, path, query });
+};
+

@@ -1,10 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { listNginxSites, getNginxConfig, saveNginxConfig, toggleNginxSite, testNginxConfig, reloadNginx, getSslCertificates, type NginxSite, type SslCertificate } from '@/lib/tauri-client';
-import { Globe, ShieldCheck, FileCode2, RefreshCw, CheckCircle2, Play, Shield, Loader2, Save } from 'lucide-react';
+import { 
+  listNginxSites, 
+  getNginxConfig, 
+  saveNginxConfig, 
+  toggleNginxSite, 
+  testNginxConfig, 
+  reloadNginx, 
+  getSslCertificates, 
+  renewSslCertificates,
+  type NginxSite, 
+  type SslCertificate 
+} from '@/lib/tauri-client';
+import { 
+  Globe, 
+  ShieldCheck, 
+  FileCode2, 
+  RefreshCw, 
+  CheckCircle2, 
+  Play, 
+  Loader2, 
+  Save, 
+  Clock, 
+  AlertTriangle, 
+  Sparkles,
+  ShieldAlert
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 interface NginxManagerProps {
@@ -12,6 +37,7 @@ interface NginxManagerProps {
 }
 
 export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
+  const [activeTab, setActiveTab] = useState<'sites' | 'ssl'>('sites');
   const [sites, setSites] = useState<NginxSite[]>([]);
   const [certs, setCerts] = useState<SslCertificate[]>([]);
   const [loading, setLoading] = useState(false);
@@ -26,6 +52,11 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
   // Syntax Test Modal
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testOutput, setTestOutput] = useState('');
+
+  // SSL Renewal Modal
+  const [renewalModalOpen, setRenewalModalOpen] = useState(false);
+  const [renewalOutput, setRenewalOutput] = useState('');
+  const [renewalSuccess, setRenewalSuccess] = useState(true);
 
   const loadData = async () => {
     setLoading(true);
@@ -108,138 +139,357 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
     }
   };
 
+  const handleRenewCertificates = async (dryRun: boolean) => {
+    setActionLoading(true);
+    try {
+      const res = await renewSslCertificates(serverId, dryRun);
+      setRenewalSuccess(res.success);
+      setRenewalOutput(res.output);
+      setRenewalModalOpen(true);
+      if (res.success) {
+        toast.success(dryRun ? 'Dry run completed successfully' : 'Certificates renewed successfully');
+        loadData();
+      } else {
+        toast.error('Certbot renewal encountered warnings or errors');
+      }
+    } catch (err: any) {
+      setRenewalSuccess(false);
+      setRenewalOutput(err.message || String(err));
+      setRenewalModalOpen(true);
+      toast.error('Failed to execute certbot renewal');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const expiringSoonCount = certs.filter(c => c.days_remaining !== null && c.days_remaining <= 30 && c.days_remaining > 0).length;
+  const expiredCount = certs.filter(c => !c.is_valid || (c.days_remaining !== null && c.days_remaining <= 0)).length;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Top Header & Navigation Strip */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border/40 shrink-0">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">Nginx Reverse Proxy</h2>
-          <p className="text-sm text-muted-foreground">
-            Manage virtual host sites, proxy passes, configuration files, and SSL certificates.
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+              <Globe className="w-5 h-5 text-primary" />
+              Nginx Proxy & SSL Center
+            </h2>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+              Web Routing
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+            Manage virtual hosts, reverse proxies, and monitor Let's Encrypt SSL certificate expirations
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleTestSyntax} disabled={actionLoading || loading}>
-            <CheckCircle2 className="h-4 w-4 mr-2 text-emerald-500" />
-            Test Config
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleReload} disabled={actionLoading || loading}>
-            <Play className="h-4 w-4 mr-2 text-primary" />
-            Reload Nginx
-          </Button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {activeTab === 'sites' ? (
+            <>
+              <Button variant="outline" size="sm" onClick={handleTestSyntax} disabled={actionLoading || loading}>
+                <CheckCircle2 className="h-4 w-4 mr-1.5 text-emerald-500" />
+                Test Syntax
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleReload} disabled={actionLoading || loading}>
+                <Play className="h-4 w-4 mr-1.5 text-primary" />
+                Reload Nginx
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => handleRenewCertificates(true)} 
+                disabled={actionLoading || loading}
+                className="text-xs"
+              >
+                <Sparkles className="h-3.5 w-3.5 mr-1.5 text-sky-400" />
+                Dry Run Test
+              </Button>
+              <Button 
+                size="sm" 
+                onClick={() => handleRenewCertificates(false)} 
+                disabled={actionLoading || loading}
+                className="text-xs bg-primary text-primary-foreground font-semibold"
+              >
+                {actionLoading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />}
+                Renew All Now
+              </Button>
+            </>
+          )}
+
           <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </div>
 
-      {/* SSL Certificates Banner if any */}
-      {certs.length > 0 && (
-        <Card className="bg-card/50 border-primary/20">
-          <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-primary" />
-              <CardTitle className="text-sm font-medium">SSL / Let's Encrypt Certificates</CardTitle>
+      {/* Sub-Tabs Selector */}
+      <div className="flex items-center gap-2 border-b border-border/60 pb-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab('sites')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all select-none border cursor-pointer ${
+            activeTab === 'sites'
+              ? 'bg-primary/15 text-primary border-primary/30 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border-transparent'
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5" />
+          <span>Virtual Host Sites ({sites.length})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('ssl')}
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all select-none border cursor-pointer ${
+            activeTab === 'ssl'
+              ? 'bg-primary/15 text-primary border-primary/30 shadow-xs'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border-transparent'
+          }`}
+        >
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>SSL Watchdog ({certs.length})</span>
+          {expiringSoonCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.2 bg-amber-500/20 text-amber-500 rounded-full text-[10px] font-bold">
+              {expiringSoonCount} expiring
+            </span>
+          )}
+          {expiredCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.2 bg-rose-500/20 text-rose-500 rounded-full text-[10px] font-bold">
+              {expiredCount} expired
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Tab View 1: Sites */}
+      {activeTab === 'sites' && (
+        <div className="grid grid-cols-1 gap-4">
+          {loading && sites.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-12 text-muted-foreground gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <p className="text-sm font-mono">Querying Nginx configurations...</p>
             </div>
-            <span className="text-xs text-muted-foreground">{certs.length} Active Certificate(s)</span>
-          </CardHeader>
-          <CardContent className="py-2 px-4 divide-y divide-border/40">
-            {certs.map((c, i) => (
-              <div key={i} className="py-2 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                  <span className="font-semibold text-foreground">{c.cert_name}</span>
-                  <span className="text-muted-foreground font-mono">({c.domain || 'All subdomains'})</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {c.days_remaining !== null && (
-                    <span className={`px-2 py-0.5 rounded-full font-medium ${c.days_remaining < 30 ? 'bg-amber-500/10 text-amber-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
-                      {c.days_remaining} days left
-                    </span>
-                  )}
-                  <span className="text-muted-foreground">{c.expiry_date}</span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Sites List */}
-      <div className="space-y-4">
-        {sites.length === 0 && !loading ? (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-              <Globe className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <h3 className="font-semibold text-lg">No Nginx sites found</h3>
-              <p className="text-sm text-muted-foreground max-w-md mt-1">
-                No configurations discovered in <code>/etc/nginx/sites-available</code> or <code>/etc/nginx/conf.d</code>.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          sites.map(s => (
-            <Card key={s.name} className={`overflow-hidden transition-all ${s.is_enabled ? 'border-border' : 'border-border/40 opacity-75'}`}>
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-lg ${s.is_enabled ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                    <Globe className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <span className="font-semibold text-base">{s.name}</span>
-                      {s.is_enabled ? (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 font-medium">
-                          Enabled
-                        </span>
-                      ) : (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-medium">
-                          Disabled
-                        </span>
-                      )}
-                      {s.ssl_enabled && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium flex items-center gap-1">
-                          <ShieldCheck className="h-3 w-3" /> SSL Active
-                        </span>
-                      )}
-                    </div>
-                    
-                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                      {s.domains.length > 0 ? (
-                        s.domains.map((d, i) => (
-                          <span key={i} className="text-xs font-mono bg-secondary/80 px-2 py-0.5 rounded text-secondary-foreground">
-                            {d}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">Default / Catch-all</span>
-                      )}
-                    </div>
-
-                    {s.proxy_pass && (
-                      <div className="text-xs text-muted-foreground font-mono mt-1">
-                        Proxy Pass: <span className="text-foreground">{s.proxy_pass}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <Button variant="outline" size="sm" onClick={() => handleEdit(s)}>
-                    <FileCode2 className="h-4 w-4 mr-1.5" />
-                    Edit Config
-                  </Button>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={s.is_enabled}
-                      onCheckedChange={checked => handleToggle(s, checked)}
-                    />
-                  </div>
-                </div>
+          ) : sites.length === 0 ? (
+            <Card className="bg-card/40 border-dashed">
+              <CardContent className="p-8 text-center text-muted-foreground text-sm">
+                No virtual host files found in <code>/etc/nginx/sites-available/</code> or <code>/etc/nginx/conf.d/</code>.
               </CardContent>
             </Card>
-          ))
-        )}
-      </div>
+          ) : (
+            sites.map(s => (
+              <Card key={s.name} className="bg-card/80 border-border hover:border-primary/30 transition-all shadow-xs">
+                <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3.5 min-w-0">
+                    <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary shrink-0 mt-0.5">
+                      <Globe className="h-5 w-5" />
+                    </div>
+
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-sm text-foreground truncate">{s.name}</span>
+                        <Badge variant="outline" className={`text-[10px] font-semibold ${
+                          s.is_enabled 
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' 
+                            : 'bg-muted text-muted-foreground border-border'
+                        }`}>
+                          {s.is_enabled ? 'Enabled (Active)' : 'Disabled'}
+                        </Badge>
+                        {s.ssl_enabled && (
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-medium flex items-center gap-1 border border-blue-500/20">
+                            <ShieldCheck className="h-3 w-3" /> SSL Active
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        {s.domains.length > 0 ? (
+                          s.domains.map((d, i) => (
+                            <span key={i} className="text-xs font-mono bg-muted px-2 py-0.5 rounded text-foreground border border-border/50">
+                              {d}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">Default / Catch-all</span>
+                        )}
+                      </div>
+
+                      {s.proxy_pass && (
+                        <div className="text-xs text-muted-foreground font-mono mt-1">
+                          Proxy Pass: <span className="text-foreground font-medium">{s.proxy_pass}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <Button variant="outline" size="sm" onClick={() => handleEdit(s)} className="h-8 text-xs">
+                      <FileCode2 className="h-3.5 w-3.5 mr-1.5" />
+                      Edit Config
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={s.is_enabled}
+                        onCheckedChange={checked => handleToggle(s, checked)}
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Tab View 2: SSL Certificate Watchdog */}
+      {activeTab === 'ssl' && (
+        <div className="space-y-6">
+          {/* SSL Overview Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card className="bg-card/70 border-border shadow-xs">
+              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Managed Certs</span>
+                <ShieldCheck className="w-4 h-4 text-primary" />
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className="text-2xl font-bold text-foreground">{certs.length}</div>
+                <p className="text-[11px] text-muted-foreground">Discovered via Certbot / Let's Encrypt</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/70 border-border shadow-xs">
+              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Expiring Soon</span>
+                <Clock className="w-4 h-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className={`text-2xl font-bold ${expiringSoonCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
+                  {expiringSoonCount}
+                </div>
+                <p className="text-[11px] text-muted-foreground">Due for renewal within 30 days</p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-card/70 border-border shadow-xs">
+              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Expired / Invalid</span>
+                <AlertTriangle className="w-4 h-4 text-rose-500" />
+              </CardHeader>
+              <CardContent className="p-4 pt-1">
+                <div className={`text-2xl font-bold ${expiredCount > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                  {expiredCount}
+                </div>
+                <p className="text-[11px] text-muted-foreground">Immediate action required</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Certificates Grid */}
+          <div className="grid grid-cols-1 gap-4">
+            {certs.length === 0 ? (
+              <Card className="bg-card/40 border-dashed">
+                <CardContent className="p-8 text-center space-y-2">
+                  <ShieldAlert className="w-8 h-8 text-muted-foreground mx-auto opacity-50" />
+                  <p className="text-sm font-semibold text-foreground">No Certbot Certificates Found</p>
+                  <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                    No active Let's Encrypt certificates were reported by <code>certbot certificates</code> on this server.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              certs.map((c, idx) => {
+                const days = c.days_remaining;
+                const isExpiring = days !== null && days <= 30 && days > 0;
+                const isExpired = !c.is_valid || (days !== null && days <= 0);
+
+                return (
+                  <Card key={idx} className="bg-card/80 border-border shadow-xs hover:border-primary/30 transition-all">
+                    <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-start gap-3.5 min-w-0">
+                        <div className={`p-2.5 rounded-xl border shrink-0 mt-0.5 ${
+                          isExpired 
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-500' 
+                            : isExpiring 
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' 
+                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
+                        }`}>
+                          <ShieldCheck className="h-5 w-5" />
+                        </div>
+
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-foreground truncate font-mono">
+                              {c.cert_name}
+                            </span>
+
+                            {isExpired ? (
+                              <Badge variant="outline" className="text-[10px] bg-rose-500/15 text-rose-500 border-rose-500/30 font-bold">
+                                Expired / Invalid
+                              </Badge>
+                            ) : isExpiring ? (
+                              <Badge variant="outline" className="text-[10px] bg-amber-500/15 text-amber-500 border-amber-500/30 font-bold">
+                                Expires in {days} days
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-semibold">
+                                Valid ({days !== null ? `${days} days left` : 'Active'})
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1 font-mono text-xs">
+                            <span className="text-muted-foreground">Domains:</span>
+                            {c.domain ? (
+                              c.domain.split(/\s+/).map((d, i) => (
+                                <span key={i} className="bg-muted px-2 py-0.5 rounded text-foreground border border-border/50">
+                                  {d}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-muted-foreground italic">None listed</span>
+                            )}
+                          </div>
+
+                          {c.expiry_date && (
+                            <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-muted-foreground/70" />
+                              <span>Expiry: {c.expiry_date}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleRenewCertificates(true)}
+                          disabled={actionLoading}
+                          className="h-8 text-xs border-border text-foreground hover:bg-accent"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 mr-1.5 text-sky-400" />
+                          Dry Run
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          onClick={() => handleRenewCertificates(false)}
+                          disabled={actionLoading}
+                          className="h-8 text-xs bg-primary text-primary-foreground font-semibold"
+                        >
+                          Renew
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit Config Modal */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
@@ -289,6 +539,31 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
           </pre>
           <DialogFooter>
             <Button onClick={() => setTestModalOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renewal Output Modal */}
+      <Dialog open={renewalModalOpen} onOpenChange={setRenewalModalOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {renewalSuccess ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+              )}
+              <span>Certbot Renewal Terminal Output</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {renewalSuccess ? 'Certbot executed successfully.' : 'Review output for renewal warnings or errors.'}
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="p-3.5 bg-muted/70 rounded-xl text-xs font-mono whitespace-pre-wrap overflow-x-auto text-foreground max-h-72 border border-border">
+            {renewalOutput || 'No output returned.'}
+          </pre>
+          <DialogFooter>
+            <Button onClick={() => setRenewalModalOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

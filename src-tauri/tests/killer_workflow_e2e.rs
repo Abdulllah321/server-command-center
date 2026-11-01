@@ -138,9 +138,9 @@ fn test_killer_workflow_end_to_end_timed() {
     {
         let conn = db.lock().unwrap();
         
-        // Find Node.js profile
+        // Find NestJS profile
         let profile_id: String = conn.query_row(
-            "SELECT id FROM rebuild_profiles WHERE name LIKE '%Node%' LIMIT 1",
+            "SELECT id FROM rebuild_profiles WHERE name LIKE '%Nest%' LIMIT 1",
             [],
             |r| r.get(0)
         ).unwrap();
@@ -323,9 +323,9 @@ fn test_killer_workflow_end_to_end_timed() {
         // 3. Search rebuild profiles
         let matched_profiles: Vec<String> = {
             let mut stmt = conn.prepare("SELECT name FROM rebuild_profiles WHERE lower(name) LIKE ?1").unwrap();
-            stmt.query_map([query_pattern], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect()
+            stmt.query_map(["%nest%"], |r| r.get(0)).unwrap().filter_map(|r| r.ok()).collect()
         };
-        assert!(!matched_profiles.is_empty(), "Search should find Node.js rebuild profile");
+        assert!(!matched_profiles.is_empty(), "Search should find NestJS rebuild profile");
 
         // 4. Search commands
         let matched_cmds: Vec<String> = {

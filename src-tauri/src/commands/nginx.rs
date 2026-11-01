@@ -182,6 +182,23 @@ pub async fn list_nginx_sites(
     Ok(sites)
 }
 
+fn validate_site_name(name: &str) -> CommandResult<()> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(CommandError::Validation("Site name cannot be empty".into()));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_') {
+        return Err(CommandError::Validation(format!(
+            "Invalid site name '{}'. Only letters, numbers, dots, hyphens, and underscores are allowed.",
+            trimmed
+        )));
+    }
+    if trimmed.contains("..") || trimmed.starts_with('/') || trimmed.starts_with('\\') {
+        return Err(CommandError::Validation("Path traversal in site name is not permitted".into()));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_nginx_config(
     state: tauri::State<'_, AppState>,
@@ -189,6 +206,7 @@ pub async fn get_nginx_config(
     server_id: String,
     site_name: String,
 ) -> CommandResult<String> {
+    validate_site_name(&site_name)?;
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
@@ -210,6 +228,7 @@ pub async fn save_nginx_config(
     site_name: String,
     content: String,
 ) -> CommandResult<String> {
+    validate_site_name(&site_name)?;
     let start_time = Instant::now();
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
@@ -263,6 +282,7 @@ pub async fn toggle_nginx_site(
     site_name: String,
     enable: bool,
 ) -> CommandResult<()> {
+    validate_site_name(&site_name)?;
     let start_time = Instant::now();
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
@@ -408,4 +428,51 @@ pub async fn get_ssl_certificates(
     }
 
     Ok(certs)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CertRenewalResult {
+    pub success: bool,
+    pub output: String,
+}
+
+/// Triggers certbot renewal (dry run or real renewal) for all domains
+#[tauri::command]
+pub async fn renew_ssl_certificates(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    dry_run: bool,
+) -> CommandResult<CertRenewalResult> {
+    let start_time = std::time::Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let cmd = if dry_run {
+        "sudo certbot renew --dry-run 2>&1"
+    } else {
+        "sudo certbot renew --nginx --non-interactive 2>&1"
+    };
+
+    let output = exec_ssh_command(&mut session, cmd).await?;
+    let success = output.contains("Congratulations, all renewals succeeded") 
+        || output.contains("The following certificates are not due for renewal yet")
+        || output.contains("dry run: all simulated renewals succeeded")
+        || (!output.contains("FAILED") && !output.contains("An error occurred"));
+
+    {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: if dry_run { "ssl_certbot_dry_run".into() } else { "ssl_certbot_renew".into() },
+            target: Some("certbot".into()),
+            status: if success { "success".into() } else { "failed".into() },
+            detail: Some(output.lines().take(5).collect::<Vec<_>>().join("\n")),
+            duration_ms: Some(start_time.elapsed().as_millis() as i64),
+        });
+    }
+
+    Ok(CertRenewalResult { success, output })
 }

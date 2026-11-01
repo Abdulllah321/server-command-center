@@ -53,19 +53,6 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
   const [pipelineCompleteStatus, setPipelineCompleteStatus] = useState<string | null>(null);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (open) {
-      loadInitialData();
-    } else {
-      // Reset state on close
-      setWizardStep('select_app');
-      setPipelineId(null);
-      setStepStatuses({});
-      setPipelineCompleteStatus(null);
-      setResolvedProfile(null);
-    }
-  }, [open, serverId]);
-
   const loadInitialData = async () => {
     try {
       const apps = await listApplications(serverId);
@@ -84,6 +71,19 @@ export const RebuildWizard = ({ serverId }: RebuildWizardProps) => {
       console.error(e);
     }
   };
+
+  useEffect(() => {
+    if (open) {
+      loadInitialData();
+    } else {
+      // Reset state on close
+      setWizardStep('select_app');
+      setPipelineId(null);
+      setStepStatuses({});
+      setPipelineCompleteStatus(null);
+      setResolvedProfile(null);
+    }
+  }, [open, serverId]);
 
   const handleNextToPreview = async () => {
     try {

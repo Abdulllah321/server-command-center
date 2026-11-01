@@ -15,6 +15,7 @@ pub struct AppState {
     pub db: Arc<Mutex<Connection>>,
     pub session_manager: ssh::session_manager::SessionManager,
     pub pty_manager: ssh::pty::PtyManager,
+    pub tunnel_manager: commands::tunnels::TunnelManager,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -55,11 +56,20 @@ pub fn run() {
 
             let session_manager = ssh::session_manager::SessionManager::new();
             let pty_manager = ssh::pty::PtyManager::new();
+            let tunnel_manager = commands::tunnels::TunnelManager::new();
+
+            // Start background scheduler for nightly and scheduled rebuilds
+            commands::scheduled_rebuilds::start_rebuild_scheduler(
+                db_arc.clone(),
+                app.handle().clone(),
+                session_manager.clone()
+            );
             
             app.manage(AppState { 
                 db: db_arc,
                 session_manager,
                 pty_manager,
+                tunnel_manager,
             });
       
       Ok(())
@@ -75,8 +85,13 @@ pub fn run() {
         commands::credentials::list_credentials_metadata,
         commands::credentials::reveal_credential,
         commands::credentials::delete_credential,
+        commands::credentials::is_vault_initialized,
         commands::credentials::unlock_vault,
         commands::credentials::setup_vault,
+        commands::credentials::check_windows_hello,
+        commands::credentials::enable_windows_hello,
+        commands::credentials::disable_windows_hello,
+        commands::credentials::unlock_vault_with_windows_hello,
         commands::ssh::test_connection,
         commands::ssh::test_direct_connection,
         commands::ssh::resolve_host_key_verification,
@@ -130,6 +145,11 @@ pub fn run() {
         commands::backups::create_backup,
         commands::backups::restore_backup,
         commands::backups::delete_backup,
+        commands::backups::download_backup,
+        commands::tunnels::start_port_tunnel,
+        commands::tunnels::stop_port_tunnel,
+        commands::tunnels::list_active_tunnels,
+        commands::tunnels::get_tunnel_cli_command,
         commands::nginx::list_nginx_sites,
         commands::nginx::get_nginx_config,
         commands::nginx::save_nginx_config,
@@ -137,6 +157,11 @@ pub fn run() {
         commands::nginx::test_nginx_config,
         commands::nginx::reload_nginx,
         commands::nginx::get_ssl_certificates,
+        commands::nginx::renew_ssl_certificates,
+        commands::security_audit::get_security_audit,
+        commands::security_audit::toggle_ufw,
+        commands::security_audit::add_ufw_rule,
+        commands::security_audit::delete_ufw_rule,
         commands::alerts::get_alert_rules,
         commands::alerts::save_alert_rule,
         commands::alerts::delete_alert_rule,
@@ -144,6 +169,22 @@ pub fn run() {
         commands::alerts::evaluate_health_alerts,
         pipelines::rebuild_engine::trigger_rebuild,
         pipelines::rebuild_engine::abort_pipeline,
+        commands::scheduled_rebuilds::schedule_rebuild,
+        commands::scheduled_rebuilds::get_scheduled_rebuild,
+        commands::scheduled_rebuilds::list_scheduled_rebuilds,
+        commands::scheduled_rebuilds::cancel_scheduled_rebuild,
+        commands::scheduled_rebuilds::run_scheduled_rebuild_now,
+        commands::files::list_remote_files,
+        commands::files::read_remote_file_content,
+        commands::files::write_remote_file_content,
+        commands::files::download_remote_file,
+        commands::files::upload_remote_file,
+        commands::files::create_remote_directory,
+        commands::files::create_remote_file,
+        commands::files::rename_remote_path,
+        commands::files::delete_remote_paths,
+        commands::files::change_remote_permissions,
+        commands::files::search_remote_files,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

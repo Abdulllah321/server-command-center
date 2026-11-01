@@ -22,20 +22,20 @@ export const ServerList = ({
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 w-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 w-full">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="border border-white/5 rounded-2xl p-6 bg-zinc-950/60 space-y-4">
+          <div key={i} className="border border-border rounded-2xl p-6 bg-card space-y-4">
             <div className="flex items-center space-x-4">
-              <Skeleton className="h-11 w-11 rounded-xl bg-white/5" />
+              <Skeleton className="h-11 w-11 rounded-xl bg-muted" />
               <div className="space-y-2 flex-1">
-                <Skeleton className="h-5 w-36 bg-white/5" />
-                <Skeleton className="h-3.5 w-24 bg-white/5" />
+                <Skeleton className="h-5 w-36 bg-muted" />
+                <Skeleton className="h-3.5 w-24 bg-muted" />
               </div>
             </div>
-            <Skeleton className="h-24 w-full rounded-xl bg-white/5" />
+            <Skeleton className="h-24 w-full rounded-xl bg-muted" />
             <div className="flex justify-between pt-2">
-              <Skeleton className="h-8 w-24 rounded-lg bg-white/5" />
-              <Skeleton className="h-8 w-16 rounded-lg bg-white/5" />
+              <Skeleton className="h-8 w-24 rounded-lg bg-muted" />
+              <Skeleton className="h-8 w-16 rounded-lg bg-muted" />
             </div>
           </div>
         ))}
@@ -55,7 +55,7 @@ export const ServerList = ({
   if (!servers || servers.length === 0) {
     return (
       <>
-        <div className="flex flex-col items-center justify-center py-20 px-4 border border-dashed border-white/10 rounded-2xl bg-zinc-950/40 w-full text-center">
+        <div className="flex flex-col items-center justify-center py-20 px-4 border border-dashed border-border rounded-2xl bg-card/40 w-full text-center">
           <div className="p-4 bg-primary/10 rounded-2xl mb-4 border border-primary/20">
             <ServerIcon className="h-8 w-8 text-primary" />
           </div>
@@ -91,7 +91,7 @@ export const ServerList = ({
 
   if (filteredServers.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-4 border border-white/5 rounded-2xl bg-zinc-950/40 text-center w-full">
+      <div className="flex flex-col items-center justify-center py-16 px-4 border border-border rounded-2xl bg-card/40 text-center w-full">
         <SearchX className="h-10 w-10 text-muted-foreground/40 mb-3" />
         <h3 className="text-base font-semibold text-foreground mb-1">No matching servers found</h3>
         <p className="text-xs text-muted-foreground max-w-sm mb-4">
@@ -109,7 +109,7 @@ export const ServerList = ({
 
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 w-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6 w-full">
         {filteredServers.map(server => (
           <ServerCard key={server.id} server={server} />
         ))}

@@ -35,6 +35,10 @@ pub const REMOVE_SERVER_FROM_GROUP: &str = "remove_server_from_group";
 pub const CREATE_BACKUP: &str = "create_backup";
 pub const RESTORE_BACKUP: &str = "restore_backup";
 pub const DELETE_BACKUP: &str = "delete_backup";
+pub const DOWNLOAD_BACKUP: &str = "download_backup";
+
+pub const START_TUNNEL: &str = "start_tunnel";
+pub const STOP_TUNNEL: &str = "stop_tunnel";
 
 pub const SAVE_NGINX_CONFIG: &str = "save_nginx_config";
 pub const TOGGLE_NGINX_SITE: &str = "toggle_nginx_site";
@@ -42,4 +46,13 @@ pub const RELOAD_NGINX: &str = "reload_nginx";
 
 pub const CREATE_ALERT_RULE: &str = "create_alert_rule";
 pub const DELETE_ALERT_RULE: &str = "delete_alert_rule";
+
+pub const CREATE_REMOTE_FILE: &str = "create_remote_file";
+pub const CREATE_REMOTE_DIRECTORY: &str = "create_remote_directory";
+pub const WRITE_REMOTE_FILE: &str = "write_remote_file";
+pub const RENAME_REMOTE_PATH: &str = "rename_remote_path";
+pub const DELETE_REMOTE_PATH: &str = "delete_remote_path";
+pub const UPLOAD_REMOTE_FILE: &str = "upload_remote_file";
+pub const DOWNLOAD_REMOTE_FILE: &str = "download_remote_file";
+pub const CHMOD_REMOTE_PATH: &str = "chmod_remote_path";
 

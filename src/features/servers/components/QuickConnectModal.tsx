@@ -119,7 +119,7 @@ export const QuickConnectModal = ({ open, onOpenChange, server, onConnected }: Q
             </div>
           </div>
 
-          <div className="p-3 rounded-lg bg-secondary/30 border border-white/5 text-xs text-muted-foreground">
+          <div className="p-3 rounded-lg bg-muted border border-border text-xs text-muted-foreground">
             Once saved, this password is securely anchored in your operating system keychain. Veyra will reconnect automatically without prompting again.
           </div>
 

@@ -94,23 +94,23 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
       <div className={cn("grid grid-cols-3 gap-2.5 pt-1 relative", isError && "opacity-70")}>
         {isError && (
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/60 rounded-xl backdrop-blur-[1px]">
-            <span className="text-xs text-amber-400 flex items-center font-medium bg-zinc-950 px-2.5 py-1 rounded-md border border-amber-500/20 shadow">
+            <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center font-medium bg-card px-2.5 py-1 rounded-md border border-amber-500/20 shadow-xs">
               <AlertTriangle className="h-3 w-3 mr-1" /> Reconnecting
             </span>
           </div>
         )}
 
         {/* CPU */}
-        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+        <div className="flex flex-col p-2.5 rounded-xl bg-muted/50 border border-border space-y-1.5">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
             <span className="flex items-center gap-1">
-              <Cpu className="h-3 w-3 text-blue-400" /> CPU
+              <Cpu className="h-3 w-3 text-blue-500" /> CPU
             </span>
           </div>
           <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
             {data ? `${data.cpu_pct.toFixed(1)}%` : '--'}
           </div>
-          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+          <div className="w-full bg-muted-foreground/20 rounded-full h-1 overflow-hidden">
             <div 
               className={cn("h-full transition-all duration-500", getStatusColor(data?.cpu_pct || 0))}
               style={{ width: `${Math.min(data?.cpu_pct || 0, 100)}%` }}
@@ -119,16 +119,16 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
         </div>
 
         {/* RAM */}
-        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+        <div className="flex flex-col p-2.5 rounded-xl bg-muted/50 border border-border space-y-1.5">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
             <span className="flex items-center gap-1">
-              <MemoryStick className="h-3 w-3 text-emerald-400" /> RAM
+              <MemoryStick className="h-3 w-3 text-emerald-500" /> RAM
             </span>
           </div>
           <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
             {data ? `${data.ram_pct.toFixed(1)}%` : '--'}
           </div>
-          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+          <div className="w-full bg-muted-foreground/20 rounded-full h-1 overflow-hidden">
             <div 
               className={cn("h-full transition-all duration-500", getStatusColor(data?.ram_pct || 0))}
               style={{ width: `${Math.min(data?.ram_pct || 0, 100)}%` }}
@@ -137,16 +137,16 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
         </div>
 
         {/* Disk */}
-        <div className="flex flex-col p-2.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-1.5">
+        <div className="flex flex-col p-2.5 rounded-xl bg-muted/50 border border-border space-y-1.5">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
             <span className="flex items-center gap-1">
-              <HardDrive className="h-3 w-3 text-purple-400" /> Disk
+              <HardDrive className="h-3 w-3 text-purple-500" /> Disk
             </span>
           </div>
           <div className="text-sm font-semibold tracking-tight text-foreground font-mono">
             {data ? `${data.disk_pct.toFixed(1)}%` : '--'}
           </div>
-          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
+          <div className="w-full bg-muted-foreground/20 rounded-full h-1 overflow-hidden">
             <div 
               className={cn("h-full transition-all duration-500", getStatusColor(data?.disk_pct || 0))}
               style={{ width: `${Math.min(data?.disk_pct || 0, 100)}%` }}
@@ -159,7 +159,7 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
 
   // Full Variant
   return (
-    <div className={cn("grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border rounded-xl bg-card relative", isError && "opacity-80")}>
+    <div className={cn("grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border border-border rounded-xl bg-card relative", isError && "opacity-80")}>
       {isError && (
         <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/50 rounded-xl backdrop-blur-[1px]">
           <span className="text-sm text-destructive flex items-center font-medium bg-background px-3 py-1.5 rounded-md shadow-lg border border-destructive/20"><AlertTriangle className="h-4 w-4 mr-2"/> Connection Lost / Stale Metrics</span>
@@ -167,7 +167,7 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
       )}
 
       {/* CPU */}
-      <div className="flex flex-col gap-2 bg-secondary/20 p-3 rounded-lg border border-white/5 relative">
+      <div className="flex flex-col gap-2 bg-muted/40 p-3 rounded-lg border border-border relative">
         <div className="flex items-center gap-2 text-muted-foreground text-sm font-medium">
           <Cpu className="h-4 w-4" /> CPU
         </div>
@@ -179,7 +179,7 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
       </div>
 
       {/* RAM */}
-      <div className="flex flex-col gap-2 bg-secondary/20 p-3 rounded-lg border border-white/5 relative">
+      <div className="flex flex-col gap-2 bg-muted/40 p-3 rounded-lg border border-border relative">
         <div className="flex justify-between items-start">
           <div className="flex items-center gap-2 text-muted-foreground text-sm font-medium">
             <MemoryStick className="h-4 w-4" /> RAM
@@ -194,7 +194,7 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
       </div>
 
       {/* Disk */}
-      <div className="flex flex-col gap-2 bg-secondary/20 p-3 rounded-lg border border-white/5 relative">
+      <div className="flex flex-col gap-2 bg-muted/40 p-3 rounded-lg border border-border relative">
         <div className="flex justify-between items-start">
           <div className="flex items-center gap-2 text-muted-foreground text-sm font-medium">
             <HardDrive className="h-4 w-4" /> Disk (/)
@@ -209,14 +209,14 @@ export const HealthWidget: React.FC<HealthWidgetProps> = ({ serverId, variant = 
       </div>
 
       {/* Load & Uptime */}
-      <div className="flex flex-col gap-3 bg-secondary/20 p-3 rounded-lg border border-white/5 justify-center">
+      <div className="flex flex-col gap-3 bg-muted/40 p-3 rounded-lg border border-border justify-center">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2 text-muted-foreground text-xs font-medium">
             <Activity className="h-3 w-3" /> Load Avg
           </div>
           <span className="text-xs font-medium">{data?.load_avg.map(v => v.toFixed(2)).join(', ')}</span>
         </div>
-        <div className="w-full h-px bg-white/10" />
+        <div className="w-full h-px bg-border" />
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2 text-muted-foreground text-xs font-medium">
             <Clock className="h-3 w-3" /> Uptime

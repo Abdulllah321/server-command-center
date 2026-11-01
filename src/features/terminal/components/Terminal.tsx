@@ -4,10 +4,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { RefreshCw, Trash2, Search, Copy, Type } from 'lucide-react';
+import { RefreshCw, Trash2, Search, Copy, Type, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { showIpcError, formatErrorMessage } from '@/lib/error-handler';
+import { MobileTerminalToolbar } from './MobileTerminalToolbar';
 import '@xterm/xterm/css/xterm.css';
 
 interface TerminalProps {
@@ -26,7 +27,7 @@ interface TerminalStatusEvent {
   pty_id: string;
 }
 
-export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose, isActive = true, onStatusChange }) => {
+export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, onStatusChange }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -38,6 +39,18 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose,
 
   const [fontSize, setFontSize] = useState<number>(14);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSoftKeys, setShowSoftKeys] = useState(true);
+
+  const handleSendKey = (str: string) => {
+    if (!ptyIdRef.current) return;
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    invoke('write_to_terminal', {
+      sessionId: ptyIdRef.current,
+      data: Array.from(bytes),
+    }).catch(() => {});
+    xtermRef.current?.focus();
+  };
 
   // Initialize terminal
   useEffect(() => {
@@ -258,7 +271,7 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose,
           cols: term.cols || 80,
           rows: term.rows || 24,
         }).catch(() => {});
-      } catch (e) {
+      } catch {
         // fit() can throw if container is hidden/0px
       }
     };
@@ -300,6 +313,15 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose,
           <Button variant="ghost" size="icon" onClick={() => changeFontSize(1)} title="Increase Font Size" className="h-7 w-7 text-muted-foreground hover:text-foreground">
             <Type className="h-4 w-4" />
           </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setShowSoftKeys(p => !p)} 
+            title={showSoftKeys ? "Hide Mobile Key Bar" : "Show Mobile Key Bar"} 
+            className={`h-7 w-7 ${showSoftKeys ? 'text-primary bg-white/10' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <Smartphone className="h-4 w-4" />
+          </Button>
         </div>
 
         <div className="flex-1" />
@@ -320,6 +342,11 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, onClose: _onClose,
         className="flex-1 w-full relative overflow-hidden" 
         ref={terminalRef}
       />
+
+      {/* Mobile/Touch Terminal Auxiliary Soft-Keys Bar */}
+      {showSoftKeys && (
+        <MobileTerminalToolbar onSendKey={handleSendKey} />
+      )}
     </div>
   );
 };

@@ -17,19 +17,19 @@ export const TerminalTabManager: React.FC<TerminalTabManagerProps> = ({ serverId
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  // Initialize first tab automatically
-  useEffect(() => {
-    if (tabs.length === 0) {
-      addTab();
-    }
-  }, [serverId]);
-
   const addTab = () => {
     const newId = crypto.randomUUID();
     const newTitle = `Terminal ${tabs.length + 1}`;
     setTabs(prev => [...prev, { id: newId, title: newTitle, status: 'reconnecting' }]);
     setActiveTabId(newId);
   };
+
+  // Initialize first tab automatically
+  useEffect(() => {
+    if (tabs.length === 0) {
+      addTab();
+    }
+  }, [serverId]);
 
   const updateTabStatus = (id: string, status: 'connected' | 'reconnecting' | 'disconnected') => {
     setTabs(prev => prev.map(t => t.id === id ? { ...t, status } : t));

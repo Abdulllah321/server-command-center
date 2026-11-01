@@ -22,6 +22,12 @@ export interface CredentialMetadataExtended extends CredentialMetadata {
   server_name: string;
 }
 
+export interface WindowsHelloStatus {
+  supported: boolean;
+  enrolled: boolean;
+  enabled: boolean;
+}
+
 export interface Server {
   id: string;
   name: string;
@@ -249,4 +255,44 @@ export interface EvaluateAlertsPayload {
   disk_percent: number;
   errored_pm2_count: number;
 }
+
+export interface RemoteFileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_symlink: boolean;
+  size: number;
+  modified: number;
+  permissions: string;
+  mode: string;
+  owner: string;
+  group: string;
+  extension: string;
+}
+
+export interface RemoteDirectoryListing {
+  current_path: string;
+  parent_path: string | null;
+  entries: RemoteFileEntry[];
+  total_files: number;
+  total_dirs: number;
+  total_size: number;
+}
+
+export interface RemoteFileContent {
+  path: string;
+  content: string;
+  size: number;
+  is_binary: boolean;
+  is_truncated: boolean;
+  encoding: string;
+}
+
+export interface DownloadedFilePayload {
+  filename: string;
+  base64_content: string;
+  size: number;
+  is_archive: boolean;
+}
+
 

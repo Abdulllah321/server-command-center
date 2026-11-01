@@ -94,7 +94,9 @@ const GroupDetailInner = ({ id, servers }: { id: string, servers: Server[] }) =>
           <Button variant="destructive" disabled={isExecuting || groupServers.length === 0} onClick={async () => {
              try {
                await requestConfirmation("Delete All Servers in Group", groupServers.map((s: Server) => s.name));
-             } catch {}
+             } catch {
+               // User cancelled confirmation dialog
+             }
           }}>
             <Trash2 className="w-4 h-4 mr-2" />
             Delete Servers

@@ -25,6 +25,17 @@ export const RebuildProfileManager = () => {
   const [isBuiltin, setIsBuiltin] = useState(false);
   const [isEditingNew, setIsEditingNew] = useState(false);
   
+  const selectProfile = (id: string, list: RebuildProfile[] = profiles) => {
+    const prof = list.find(p => p.id === id);
+    if (prof) {
+      setSelectedId(id);
+      setName(prof.name);
+      setSteps(prof.steps);
+      setIsBuiltin(prof.is_builtin);
+      setIsEditingNew(false);
+    }
+  };
+
   const loadProfiles = async () => {
     try {
       const data = await listProfiles();
@@ -43,17 +54,6 @@ export const RebuildProfileManager = () => {
   useEffect(() => {
     loadProfiles();
   }, []);
-
-  const selectProfile = (id: string, list: RebuildProfile[] = profiles) => {
-    const prof = list.find(p => p.id === id);
-    if (prof) {
-      setSelectedId(id);
-      setName(prof.name);
-      setSteps(prof.steps);
-      setIsBuiltin(prof.is_builtin);
-      setIsEditingNew(false);
-    }
-  };
 
   const handleNewProfile = () => {
     setSelectedId(null);

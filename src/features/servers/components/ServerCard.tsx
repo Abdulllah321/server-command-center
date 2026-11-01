@@ -93,7 +93,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
           e.dataTransfer.setData('application/json', JSON.stringify({ type: 'server', id: server.id }));
           e.dataTransfer.effectAllowed = 'copyMove';
         }}
-        className="group relative rounded-2xl border border-white/10 bg-zinc-950/70 hover:bg-zinc-900/80 hover:border-white/20 transition-all duration-300 shadow-xl hover:shadow-2xl cursor-pointer p-6 space-y-5"
+        className="group relative rounded-2xl border border-border bg-card/90 hover:bg-card hover:border-primary/40 transition-all duration-300 shadow-sm hover:shadow-md cursor-pointer p-6 space-y-5"
         onClick={() => navigate(`/server/${server.id}`)}
       >
         {/* Card Header */}
@@ -115,7 +115,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
                 onClick={handleCopyHost}
                 title="Click to copy SSH address"
               >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-zinc-500'}`} />
+                <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-muted-foreground/60'}`} />
                 <span className="truncate">{server.username}@{server.hostname}:{server.ssh_port}</span>
                 {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 opacity-0 group-hover:opacity-70" />}
               </div>
@@ -123,7 +123,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-            <Badge variant="outline" className="text-[11px] font-medium bg-zinc-900/80 border-white/10 capitalize text-zinc-300">
+            <Badge variant="outline" className="text-[11px] font-medium bg-muted/80 border-border capitalize text-muted-foreground">
               {server.environment}
             </Badge>
 
@@ -133,7 +133,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
                   <MoreVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-zinc-900 border-white/10 text-xs">
+              <DropdownMenuContent align="end" className="bg-popover border-border text-xs">
                 <DropdownMenuItem onClick={() => setIsEditOpen(true)}>
                   <Edit className="mr-2 h-3.5 w-3.5" />
                   <span>Edit Server</span>
@@ -151,7 +151,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
         <div className="space-y-1">
           <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
             <span>System Telemetry</span>
-            <span className="text-[10px] text-zinc-500">Live 30s Poll</span>
+            <span className="text-[10px] text-muted-foreground/70">Live 30s Poll</span>
           </div>
           <HealthWidget serverId={server.id} variant="compact" pollInterval={30000} />
         </div>
@@ -160,7 +160,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
         {server.tags && server.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pt-1">
             {server.tags.map(tag => (
-              <span key={tag} className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-zinc-900/80 text-zinc-400 border border-white/5">
+              <span key={tag} className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-muted text-muted-foreground border border-border/60">
                 #{tag}
               </span>
             ))}
@@ -168,12 +168,12 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
         )}
 
         {/* Footer Action Strip */}
-        <div className="border-t border-white/5 pt-4 flex items-center justify-between gap-2" onClick={e => e.stopPropagation()}>
+        <div className="border-t border-border/60 pt-4 flex items-center justify-between gap-2" onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-2">
             <Button 
               size="sm"
               variant="default"
-              className="h-8 px-3 text-xs bg-primary/90 hover:bg-primary text-primary-foreground font-medium shadow-sm flex items-center gap-1.5"
+              className="h-8 px-3 text-xs flex items-center gap-1.5"
               onClick={() => navigate(`/server/${server.id}?tab=terminal`)}
               title="Open Integrated Terminal in Veyra"
             >
@@ -183,7 +183,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
             <Button 
               size="sm"
               variant="outline" 
-              className="h-8 px-2.5 text-xs border-white/10 hover:bg-white/5 text-muted-foreground hover:text-foreground"
+              className="h-8 px-2.5 text-xs border-border hover:bg-muted text-muted-foreground hover:text-foreground"
               title="Launch External SSH Terminal (Windows Terminal / PowerShell)"
               onClick={async () => {
                 try {

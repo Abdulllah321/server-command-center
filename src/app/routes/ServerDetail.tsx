@@ -23,14 +23,20 @@ import {
   RotateCw,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  Network,
+  FolderTree,
+  ShieldCheck
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
 import { Pm2Table } from '@/features/pm2/components/Pm2Table';
 import { NginxManager } from '@/features/nginx/components/NginxManager';
 import { BackupsManager } from '@/features/backups/components/BackupsManager';
+import { PortTunnelManager } from '@/features/tunnels/components/PortTunnelManager';
+import { FileManager } from '@/features/files/components/FileManager';
 import { AlertsManager } from '@/features/alerts/components/AlertsManager';
+import { SecurityAuditManager } from '@/features/security/components/SecurityAuditManager';
 import { ServerModal } from '@/features/servers/components/ServerModal';
 import { ServerConnectionBanner } from '@/features/servers/components/ServerConnectionBanner';
 import { QuickConnectModal } from '@/features/servers/components/QuickConnectModal';
@@ -159,6 +165,13 @@ export const ServerDetail = () => {
       accentBg: 'bg-primary' 
     },
     { 
+      id: 'files', 
+      label: 'Files (SFTP)', 
+      icon: FolderTree, 
+      accentColor: 'text-blue-400', 
+      accentBg: 'bg-blue-400' 
+    },
+    { 
       id: 'terminal', 
       label: 'Terminal', 
       icon: TerminalSquare, 
@@ -173,11 +186,25 @@ export const ServerDetail = () => {
       accentBg: 'bg-cyan-400' 
     },
     { 
+      id: 'tunnels', 
+      label: 'Port Tunnels', 
+      icon: Network, 
+      accentColor: 'text-teal-400', 
+      accentBg: 'bg-teal-400' 
+    },
+    { 
       id: 'backups', 
       label: 'Backups', 
       icon: HardDrive, 
       accentColor: 'text-indigo-400', 
       accentBg: 'bg-indigo-400' 
+    },
+    { 
+      id: 'security', 
+      label: 'Security & Ports', 
+      icon: ShieldCheck, 
+      accentColor: 'text-emerald-400', 
+      accentBg: 'bg-emerald-400' 
     },
     { 
       id: 'alerts', 
@@ -189,26 +216,27 @@ export const ServerDetail = () => {
   ];
 
   return (
-    <div className="flex flex-col h-full w-full bg-background overflow-hidden p-6 gap-6">
+    <div className="flex flex-col h-full w-full bg-background overflow-hidden p-3 sm:p-5 lg:p-6 gap-4 sm:gap-6">
       {/* Top Cockpit Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-white/5">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:text-foreground" onClick={() => navigate('/')}>
-            <ArrowLeft className="h-5 w-5" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pb-2 border-b border-border/40 shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+          <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-9 sm:w-9 text-muted-foreground hover:text-foreground shrink-0" onClick={() => navigate('/')}>
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">{server?.name || 'Server Management'}</h1>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg sm:text-2xl font-bold tracking-tight text-foreground truncate">{server?.name || 'Server Management'}</h1>
               {server && (
-                <Badge variant="outline" className="capitalize text-xs font-medium bg-zinc-900 border-white/10 text-zinc-300">
+                <Badge variant="outline" className="capitalize text-[10px] sm:text-xs font-medium bg-muted border-border text-muted-foreground">
                   {server.environment}
                 </Badge>
               )}
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium border ${
+                isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-muted text-muted-foreground border-border'
               }`}>
-                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-500'}`} />
-                {isOnline ? 'Online • SSH Channel Active' : 'Offline / Standby'}
+                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground'}`} />
+                <span className="hidden sm:inline">{isOnline ? 'Online • SSH Channel Active' : 'Offline / Standby'}</span>
+                <span className="sm:hidden">{isOnline ? 'Online' : 'Offline'}</span>
               </span>
             </div>
 
@@ -235,9 +263,8 @@ export const ServerDetail = () => {
           {server && (
             <>
               <Button 
-                variant="default" 
                 size="sm" 
-                className="bg-primary/90 hover:bg-primary text-primary-foreground shadow-sm h-8 text-xs font-medium"
+                className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow-xs h-8 text-xs px-3"
                 onClick={() => setIsQuickConnectOpen(true)}
               >
                 <KeyRound className="h-3.5 w-3.5 mr-1.5" />
@@ -246,7 +273,7 @@ export const ServerDetail = () => {
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="h-8 text-xs border-white/10" 
+                className="h-8 text-xs border-border bg-card text-foreground hover:bg-accent px-3" 
                 onClick={() => setActiveTab('rebuild')}
               >
                 <Rocket className="h-3.5 w-3.5 mr-1.5 text-primary" />
@@ -255,16 +282,16 @@ export const ServerDetail = () => {
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="h-8 text-xs border-white/10" 
+                className="h-8 text-xs border-border bg-card text-foreground hover:bg-accent px-3" 
                 onClick={() => setIsEditOpen(true)}
               >
-                <Edit className="h-3.5 w-3.5 mr-1.5" />
+                <Edit className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
                 Edit
               </Button>
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="h-8 text-xs border-white/10 text-destructive hover:text-destructive hover:bg-destructive/10" 
+                className="h-8 text-xs border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 px-3" 
                 onClick={() => setIsDeleteDialogOpen(true)}
               >
                 <Trash className="h-3.5 w-3.5 mr-1.5" />
@@ -277,7 +304,7 @@ export const ServerDetail = () => {
 
       {/* Main Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col flex-1 min-h-0">
-        <TabsList className="w-fit flex flex-wrap items-center bg-zinc-950/90 border border-white/10 p-1.5 rounded-2xl gap-1.5 shadow-xl backdrop-blur-md">
+        <TabsList className="w-full sm:w-fit max-w-full flex items-center overflow-x-auto no-scrollbar bg-card/80 border border-border p-1.5 rounded-2xl gap-1.5 shadow-lg backdrop-blur-md shrink-0">
           {NAV_TABS.map((tab) => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
@@ -288,8 +315,8 @@ export const ServerDetail = () => {
                 className={cn(
                   "relative flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 select-none cursor-pointer",
                   isActive
-                    ? "bg-zinc-800 text-white font-semibold shadow-md border border-white/20 ring-1 ring-white/10"
-                    : "text-zinc-400 hover:text-zinc-100 hover:bg-white/5 border border-transparent"
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent"
                 )}
               >
                 {/* Active Indicator Pulse Dot */}
@@ -297,15 +324,15 @@ export const ServerDetail = () => {
                   <span className={cn("w-1.5 h-1.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor] animate-pulse", tab.accentBg)} />
                 )}
                 
-                <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? tab.accentColor : "text-zinc-400")} />
+                <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
                 <span>{tab.label}</span>
 
                 {tab.badge !== undefined && (
                   <span className={cn(
                     "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono transition-colors",
                     isActive 
-                      ? "bg-primary/20 text-primary border border-primary/30 font-bold" 
-                      : "bg-zinc-800 text-zinc-400 border border-white/5"
+                      ? "bg-primary-foreground/20 text-primary-foreground font-bold" 
+                      : "bg-muted text-muted-foreground border border-border"
                   )}>
                     {tab.badge}
                   </span>
@@ -332,16 +359,16 @@ export const ServerDetail = () => {
           {/* Quick Cockpit Action Strip (PM2 Bulk + Fast Rebuild) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Quick PM2 Reload */}
-            <div className="p-4 rounded-2xl bg-zinc-950/70 border border-white/10 flex flex-col justify-between gap-3 shadow-sm">
+            <div className="p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">PM2 Workloads</span>
-                <span className="text-xs font-mono text-emerald-400">{onlinePm2}/{totalPm2} Active</span>
+                <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400">{onlinePm2}/{totalPm2} Active</span>
               </div>
               <div className="flex items-center gap-2">
                 <Button 
                   size="sm" 
                   variant="outline" 
-                  className="flex-1 h-8 text-xs border-white/10 hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300"
+                  className="flex-1 h-8 text-xs border-border hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                   onClick={handleReloadAll}
                 >
                   <RefreshCw className="h-3.5 w-3.5 mr-1" />
@@ -350,7 +377,7 @@ export const ServerDetail = () => {
                 <Button 
                   size="sm" 
                   variant="outline" 
-                  className="h-8 text-xs border-white/10 hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-300"
+                  className="h-8 text-xs border-border hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400"
                   onClick={handleRestartAll}
                 >
                   <RotateCw className="h-3.5 w-3.5" />
@@ -359,15 +386,15 @@ export const ServerDetail = () => {
             </div>
 
             {/* Quick Frontend Rebuild */}
-            <div className="p-4 rounded-2xl bg-zinc-950/70 border border-white/10 flex flex-col justify-between gap-3 shadow-sm">
+            <div className="p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Frontend App</span>
-                <span className="text-[10px] text-zinc-500 font-mono">bun build</span>
+                <span className="text-[10px] text-muted-foreground font-mono">bun build</span>
               </div>
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="w-full h-8 text-xs border-white/10 hover:border-primary/40 hover:bg-primary/10 text-foreground"
+                className="w-full h-8 text-xs border-border hover:border-primary/40 hover:bg-primary/10 text-foreground"
                 onClick={() => setActiveTab('rebuild')}
               >
                 <Rocket className="h-3.5 w-3.5 mr-1.5 text-primary" />
@@ -376,15 +403,15 @@ export const ServerDetail = () => {
             </div>
 
             {/* Quick Backend Rebuild */}
-            <div className="p-4 rounded-2xl bg-zinc-950/70 border border-white/10 flex flex-col justify-between gap-3 shadow-sm">
+            <div className="p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Backend App</span>
-                <span className="text-[10px] text-zinc-500 font-mono">pm2 restart</span>
+                <span className="text-[10px] text-muted-foreground font-mono">pm2 restart</span>
               </div>
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="w-full h-8 text-xs border-white/10 hover:border-primary/40 hover:bg-primary/10 text-foreground"
+                className="w-full h-8 text-xs border-border hover:border-primary/40 hover:bg-primary/10 text-foreground"
                 onClick={() => setActiveTab('rebuild')}
               >
                 <Rocket className="h-3.5 w-3.5 mr-1.5 text-primary" />
@@ -393,24 +420,24 @@ export const ServerDetail = () => {
             </div>
 
             {/* Real-time Logs Shortcut */}
-            <div className="p-4 rounded-2xl bg-zinc-950/70 border border-white/10 flex flex-col justify-between gap-3 shadow-sm">
+            <div className="p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Log Stream</span>
-                <span className="text-[10px] text-blue-400 font-mono">Live</span>
+                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono">Live</span>
               </div>
               <Button 
                 size="sm" 
                 variant="outline" 
-                className="w-full h-8 text-xs border-white/10 hover:border-blue-500/40 hover:bg-blue-500/10 text-blue-300"
+                className="w-full h-8 text-xs border-border hover:border-blue-500/40 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400"
                 onClick={() => setActiveTab('logs')}
               >
-                <Terminal className="h-3.5 w-3.5 mr-1.5 text-blue-400" />
+                <Terminal className="h-3.5 w-3.5 mr-1.5 text-blue-500" />
                 Open Live Logs
               </Button>
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-b border-white/5 pb-2">
+          <div className="flex items-center justify-between border-b border-border pb-2">
             <h2 className="text-base font-semibold tracking-tight text-foreground">System Telemetry & Resource Monitor</h2>
           </div>
           
@@ -438,8 +465,27 @@ export const ServerDetail = () => {
           <ServerRebuildDeck serverId={id} />
         </TabsContent>
 
-        {/* Tab 5: Terminal */}
-        <TabsContent value="terminal" keepMounted className="flex-1 min-h-0 h-full mt-6 data-[state=inactive]:hidden">
+        {/* Tab 5: Remote Files (FileZilla Style - Zero Server RAM) */}
+        <TabsContent 
+          value="files" 
+          keepMounted 
+          className={cn(
+            "flex-1 min-h-0 h-full mt-6 flex flex-col",
+            activeTab !== 'files' && "!hidden"
+          )}
+        >
+          <FileManager serverId={id!} />
+        </TabsContent>
+
+        {/* Tab 6: Terminal */}
+        <TabsContent 
+          value="terminal" 
+          keepMounted 
+          className={cn(
+            "flex-1 min-h-0 h-full mt-6",
+            activeTab !== 'terminal' && "!hidden"
+          )}
+        >
           <TerminalTabManager serverId={id} />
         </TabsContent>
 
@@ -448,12 +494,22 @@ export const ServerDetail = () => {
           <NginxManager serverId={id} />
         </TabsContent>
 
-        {/* Tab 7: Backups */}
+        {/* Tab 7: Port Tunnels */}
+        <TabsContent value="tunnels" className="flex-1 mt-6 overflow-y-auto pr-2">
+          <PortTunnelManager serverId={id!} />
+        </TabsContent>
+
+        {/* Tab 8: Backups */}
         <TabsContent value="backups" className="flex-1 mt-6 overflow-y-auto pr-2">
           <BackupsManager serverId={id} />
         </TabsContent>
 
-        {/* Tab 8: Alerts */}
+        {/* Tab 9: Security & Ports */}
+        <TabsContent value="security" className="flex-1 mt-6 overflow-y-auto pr-2">
+          <SecurityAuditManager serverId={id!} />
+        </TabsContent>
+
+        {/* Tab 10: Alerts */}
         <TabsContent value="alerts" className="flex-1 mt-6 overflow-y-auto pr-2">
           <AlertsManager serverId={id} />
         </TabsContent>
@@ -461,7 +517,7 @@ export const ServerDetail = () => {
 
       {/* Delete Server Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent className="bg-zinc-950 border-white/10 text-foreground">
+        <AlertDialogContent className="bg-card border-border text-foreground">
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground text-xs">
@@ -469,7 +525,7 @@ export const ServerDetail = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-zinc-900 border-white/10">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="bg-muted border-border">Cancel</AlertDialogCancel>
             <Button variant="destructive" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
               {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Delete Server

@@ -54,25 +54,25 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'online': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-      case 'stopped': return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-      case 'errored': return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-      default: return 'bg-zinc-800 text-zinc-400 border-zinc-700';
+      case 'online': return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
+      case 'stopped': return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+      case 'errored': return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20';
+      default: return 'bg-muted text-muted-foreground border-border';
     }
   };
 
   if (isLoading && !processes) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-20 w-full rounded-2xl bg-zinc-950/60" />
-        <Skeleton className="h-[400px] w-full rounded-2xl bg-zinc-950/60" />
+        <Skeleton className="h-20 w-full rounded-2xl bg-muted" />
+        <Skeleton className="h-[400px] w-full rounded-2xl bg-muted" />
       </div>
     );
   }
 
   if (isError && !processes) {
     return (
-      <div className="p-8 flex flex-col items-center justify-center text-center border rounded-2xl bg-zinc-950/60 border-destructive/20 text-destructive">
+      <div className="p-8 flex flex-col items-center justify-center text-center border rounded-2xl bg-card border-destructive/20 text-destructive">
         <AlertCircle className="h-8 w-8 mb-4 opacity-80" />
         <h3 className="font-semibold text-lg">Failed to load PM2 processes</h3>
         <p className="text-sm opacity-80 mt-1 max-w-md">
@@ -91,27 +91,27 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
     <div className="space-y-6">
       {/* Summary Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl border border-white/10 bg-zinc-950/70 flex flex-col gap-1 shadow-sm">
+        <div className="p-4 rounded-2xl border border-border bg-card flex flex-col gap-1 shadow-xs">
           <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Total Workloads</span>
           <span className="text-2xl font-bold font-mono text-foreground">{appsCount}</span>
         </div>
-        <div className="p-4 rounded-2xl border border-white/10 bg-zinc-950/70 flex flex-col gap-1 shadow-sm">
+        <div className="p-4 rounded-2xl border border-border bg-card flex flex-col gap-1 shadow-xs">
           <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Online</span>
-          <span className="text-2xl font-bold font-mono text-emerald-400">{onlineCount}</span>
+          <span className="text-2xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{onlineCount}</span>
         </div>
-        <div className="p-4 rounded-2xl border border-white/10 bg-zinc-950/70 flex flex-col gap-1 shadow-sm">
+        <div className="p-4 rounded-2xl border border-border bg-card flex flex-col gap-1 shadow-xs">
           <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Stopped</span>
-          <span className="text-2xl font-bold font-mono text-amber-400">{stoppedCount}</span>
+          <span className="text-2xl font-bold font-mono text-amber-600 dark:text-amber-400">{stoppedCount}</span>
         </div>
-        <div className="p-4 rounded-2xl border border-white/10 bg-zinc-950/70 flex flex-col gap-1 shadow-sm">
+        <div className="p-4 rounded-2xl border border-border bg-card flex flex-col gap-1 shadow-xs">
           <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Errored</span>
-          <span className="text-2xl font-bold font-mono text-rose-400">{erroredCount}</span>
+          <span className="text-2xl font-bold font-mono text-rose-600 dark:text-rose-400">{erroredCount}</span>
         </div>
       </div>
 
       {/* Table Area */}
-      <div className="border border-white/10 rounded-2xl bg-zinc-950/70 overflow-hidden shadow-xl">
-        <div className="flex flex-wrap justify-between items-center p-4 border-b border-white/5 bg-zinc-900/40 gap-3">
+      <div className="border border-border rounded-2xl bg-card overflow-hidden shadow-xs">
+        <div className="flex flex-wrap justify-between items-center p-4 border-b border-border bg-muted/40 gap-3">
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" /> 
             <h3 className="font-semibold text-sm">PM2 Process Fleet</h3>
@@ -122,7 +122,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
             <Button 
               variant="outline" 
               size="sm" 
-              className="h-8 gap-1.5 text-xs border-white/10 hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-300"
+              className="h-8 gap-1.5 text-xs border-border hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400"
               onClick={() => restartProcess.mutate('all')}
               disabled={restartProcess.isPending}
             >
@@ -132,7 +132,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
             <Button 
               variant="outline" 
               size="sm" 
-              className="h-8 gap-1.5 text-xs border-white/10 hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300"
+              className="h-8 gap-1.5 text-xs border-border hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
               onClick={() => reloadProcess.mutate('all')}
               disabled={reloadProcess.isPending}
             >
@@ -142,7 +142,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
             <Button 
               variant="outline" 
               size="sm" 
-              className="h-8 gap-1.5 text-xs border-white/10 hover:bg-white/5"
+              className="h-8 gap-1.5 text-xs border-border hover:bg-accent"
               onClick={() => saveProcesses.mutate()}
               disabled={saveProcesses.isPending}
             >
@@ -153,7 +153,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
         
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
-            <thead className="text-xs text-muted-foreground uppercase bg-zinc-900/20 border-b border-white/5">
+            <thead className="text-xs text-muted-foreground uppercase bg-muted/30 border-b border-border">
               <tr>
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">ID</th>
@@ -212,7 +212,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 px-2 text-xs border-white/10 hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-300"
+                          className="h-7 px-2 text-xs border-border hover:border-amber-500/30 hover:bg-amber-500/10 text-amber-600 dark:text-amber-300"
                           title="Restart process"
                           onClick={() => restartProcess.mutate(proc.name)}
                           disabled={restartProcess.isPending}
@@ -223,7 +223,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 px-2 text-xs border-white/10 hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-300"
+                          className="h-7 px-2 text-xs border-border hover:border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
                           title="Zero-downtime reload"
                           onClick={() => reloadProcess.mutate(proc.name)}
                           disabled={reloadProcess.isPending}
@@ -238,7 +238,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-40 bg-zinc-900 border-white/10 text-xs">
+                          <DropdownMenuContent align="end" className="w-40 bg-card border-border text-foreground text-xs">
                             {proc.status === 'online' ? (
                               <DropdownMenuItem onClick={() => stopProcess.mutate(proc.name)}>
                                 <Square className="h-3.5 w-3.5 mr-2 text-amber-400" /> Stop
@@ -289,7 +289,7 @@ export const Pm2Table = ({ serverId }: { serverId: string }) => {
       )}
 
       <Dialog open={!!activeLogProcess} onOpenChange={(open) => !open && setActiveLogProcess(null)}>
-        <DialogContent className="max-w-5xl w-[90vw] p-0 border-none bg-transparent shadow-none">
+        <DialogContent showCloseButton={false} className="max-w-6xl w-[92vw] h-[85vh] max-h-[850px] p-0 border-none bg-transparent shadow-2xl">
           {activeLogProcess && (
             <LogViewer 
               serverId={serverId} 

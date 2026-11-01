@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   globalSearch, 
@@ -126,8 +126,8 @@ export const SearchPalette = ({ open, onClose }: SearchPaletteProps) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const doSearch = useCallback(
-    debounce(async (q: string) => {
+  const doSearch = useMemo(
+    () => debounce(async (q: string) => {
       if (q.trim().length < 2) { setResults(null); setIsLoading(false); return; }
       try {
         const res = await globalSearch(q);

@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::error::{CommandError, CommandResult};
 use crate::models::{CreateCredentialPayload, CredentialMetadata};
 use crate::secrets::{keychain, vault};
+use crate::secrets::windows_hello::{self, WindowsHelloStatus};
 use crate::db::{log_activity, ActivityEntry, actions};
 use uuid::Uuid;
 use zeroize::Zeroize;
@@ -237,6 +238,15 @@ pub async fn delete_credential(
     Ok(())
 }
 
+/// Checks if vault.json exists on disk
+#[tauri::command]
+pub async fn is_vault_initialized(
+    app_handle: tauri::AppHandle,
+) -> CommandResult<bool> {
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| CommandError::Internal(e.to_string()))?;
+    Ok(app_dir.join("vault.json").exists())
+}
+
 /// Validates master password and verifies/initializes the vault
 #[tauri::command]
 pub async fn unlock_vault(
@@ -262,6 +272,81 @@ pub async fn setup_vault(
     let res = vault::unlock(&password, &app_dir);
     password.zeroize();
     res.map(|_| ()).map_err(Into::into)
+}
+
+const WINDOWS_HELLO_KEY_REF: &str = "scc:vault:windows_hello_key";
+
+/// Checks if Windows Hello biometric authentication is supported and enabled for this vault
+#[tauri::command]
+pub async fn check_windows_hello() -> CommandResult<WindowsHelloStatus> {
+    let supported = windows_hello::is_available().await;
+    let enabled = if supported {
+        keychain::read_secret(WINDOWS_HELLO_KEY_REF).is_ok()
+    } else {
+        false
+    };
+
+    Ok(WindowsHelloStatus {
+        supported,
+        enrolled: supported,
+        enabled,
+    })
+}
+
+/// Enrolls Windows Hello: verifies master password, prompts user for biometric verification,
+/// and securely stores the master password in the OS Keychain protected entry.
+#[tauri::command]
+pub async fn enable_windows_hello(
+    app_handle: tauri::AppHandle,
+    mut password: String,
+) -> CommandResult<bool> {
+    if password.is_empty() {
+        return Err(CommandError::Validation("Master password cannot be empty".into()));
+    }
+
+    let supported = windows_hello::is_available().await;
+    if !supported {
+        return Err(CommandError::Forbidden("Windows Hello biometric verification is not available on this device".into()));
+    }
+
+    // Verify master password unlocks the vault
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| CommandError::Internal(e.to_string()))?;
+    vault::unlock(&password, &app_dir)?;
+
+    // Biometric confirmation prompt
+    windows_hello::request_user_consent("Verify your identity with Windows Hello to enable biometric unlock for Server Command Center").await?;
+
+    // Store in OS keychain
+    keychain::store_secret(WINDOWS_HELLO_KEY_REF, &password)?;
+    password.zeroize();
+
+    Ok(true)
+}
+
+/// Disables Windows Hello unlock by removing the vault key from the OS keychain
+#[tauri::command]
+pub async fn disable_windows_hello() -> CommandResult<()> {
+    let _ = keychain::delete_secret(WINDOWS_HELLO_KEY_REF);
+    Ok(())
+}
+
+/// Prompts Windows Hello biometric verification and, if verified, retrieves the master password from OS keychain
+#[tauri::command]
+pub async fn unlock_vault_with_windows_hello(
+    app_handle: tauri::AppHandle,
+) -> CommandResult<String> {
+    // 1. Check if Windows Hello key exists in Keychain
+    let stored_pw = keychain::read_secret(WINDOWS_HELLO_KEY_REF)
+        .map_err(|_| CommandError::Forbidden("Windows Hello biometric unlock is not enabled".into()))?;
+
+    // 2. Request user biometric verification
+    windows_hello::request_user_consent("Verify your identity with Windows Hello to unlock Server Command Center Vault").await?;
+
+    // 3. Verify vault unlocks with the stored password
+    let app_dir = app_handle.path().app_data_dir().map_err(|e| CommandError::Internal(e.to_string()))?;
+    vault::unlock(&stored_pw, &app_dir)?;
+
+    Ok(stored_pw)
 }
 
 #[cfg(test)]

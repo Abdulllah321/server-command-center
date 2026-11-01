@@ -37,6 +37,36 @@ pub struct UpdateProfileOptions {
 pub fn seed_builtin_profiles(conn: &rusqlite::Connection) -> CommandResult<()> {
     let builtins = vec![
         (
+            "Next.js (Zero-Downtime Staging Swap)",
+            vec![
+                RebuildStep { label: "1. Pre-flight & Git Pull".into(), command: "git fetch origin -q && git pull origin main -q".into(), continue_on_error: false },
+                RebuildStep { label: "2. Isolated Staging Preparation".into(), command: "export NODE_OPTIONS=\"--max-old-space-size=3072\" && rm -rf _build_tmp && mkdir -p _build_tmp && rsync -a --exclude='node_modules' --exclude='.next' --exclude='dist' ./ _build_tmp/".into(), continue_on_error: false },
+                RebuildStep { label: "3. Cached Dependency Check".into(), command: "cd _build_tmp && if [ -f bun.lockb ] || [ -f bun.lock ]; then LFILE=$([ -f bun.lockb ] && echo \"bun.lockb\" || echo \"bun.lock\"); NHASH=$(sha256sum \"$LFILE\" | awk '{print $1}'); OHASH=$([ -f ../.lockfile.hash ] && cat ../.lockfile.hash || echo \"\"); if [ \"$NHASH\" = \"$OHASH\" ] && [ -d ../node_modules ]; then cp -al ../node_modules ./node_modules 2>/dev/null || cp -r ../node_modules ./node_modules; else (bun install --silent || npm install --silent); echo \"$NHASH\" > ../.lockfile.hash; fi; else (bun install --silent || npm install --silent); fi".into(), continue_on_error: false },
+                RebuildStep { label: "4. Compile Staged Next.js Build".into(), command: "cd _build_tmp && (bun run build || npm run build)".into(), continue_on_error: false },
+                RebuildStep { label: "5. Atomic .next Swap & Rollback Point".into(), command: "rm -rf .next.bak && ([ -d .next ] && mv .next .next.bak || true) && mv _build_tmp/.next .next && ([ -d _build_tmp/node_modules ] && rm -rf node_modules && mv _build_tmp/node_modules node_modules || true) && rm -rf _build_tmp".into(), continue_on_error: false },
+                RebuildStep { label: "6. PM2 Zero-Downtime Cluster Reload".into(), command: "if pm2 show {{pm2_name}} >/dev/null 2>&1; then if ! pm2 reload {{pm2_name}} --update-env; then echo \"Reload failed, rolling back .next...\"; rm -rf .next; mv .next.bak .next; pm2 reload {{pm2_name}} --update-env; exit 1; fi; else pm2 start \"bun run start\" --name \"{{pm2_name}}\" -i 2 --wait-ready || pm2 start npm --name \"{{pm2_name}}\" -i 2 -- start; pm2 save >/dev/null 2>&1 || true; fi".into(), continue_on_error: false },
+            ],
+        ),
+        (
+            "NestJS (Zero-Downtime Prisma Sync & Cluster Reload)",
+            vec![
+                RebuildStep { label: "1. Pre-flight & Git Pull".into(), command: "git fetch origin -q && git pull origin main -q".into(), continue_on_error: false },
+                RebuildStep { label: "2. Install Dependencies".into(), command: "export NODE_OPTIONS=\"--max-old-space-size=3072\" && (bun install --silent || npm install --silent)".into(), continue_on_error: false },
+                RebuildStep { label: "3. Prisma Master & Tenant Sync".into(), command: "(bun run prisma:master:generate >/dev/null 2>&1 || true) && (bun run prisma:master:push >/dev/null 2>&1 || true) && (bun run prisma:tenant:generate >/dev/null 2>&1 || true) && (bun run prisma:tenant:push >/dev/null 2>&1 || true)".into(), continue_on_error: false },
+                RebuildStep { label: "4. Compile NestJS Build".into(), command: "bun run build || npm run build".into(), continue_on_error: false },
+                RebuildStep { label: "5. PM2 Zero-Downtime Cluster Reload".into(), command: "MAIN=\"dist/main.js\"; [ ! -f \"$MAIN\" ] && [ -f \"dist/src/main.js\" ] && MAIN=\"dist/src/main.js\"; if pm2 show {{pm2_name}} >/dev/null 2>&1; then pm2 reload {{pm2_name}} --update-env || pm2 restart {{pm2_name}} --update-env; else pm2 start \"$MAIN\" --name \"{{pm2_name}}\" -i 2 --wait-ready --listen-timeout 120000; pm2 save >/dev/null 2>&1 || true; fi".into(), continue_on_error: false },
+            ],
+        ),
+        (
+            "Direct In-Place Build (With Downtime)",
+            vec![
+                RebuildStep { label: "1. Git Pull".into(), command: "git pull".into(), continue_on_error: false },
+                RebuildStep { label: "2. Install Dependencies".into(), command: "bun install || npm install".into(), continue_on_error: false },
+                RebuildStep { label: "3. Build In-Place".into(), command: "bun run build || npm run build".into(), continue_on_error: false },
+                RebuildStep { label: "4. PM2 Restart".into(), command: "pm2 restart {{pm2_name}}".into(), continue_on_error: false },
+            ],
+        ),
+        (
             "Next.js + Bun",
             vec![
                 RebuildStep { label: "Pull Latest".into(), command: "git pull".into(), continue_on_error: false },
@@ -51,15 +81,6 @@ pub fn seed_builtin_profiles(conn: &rusqlite::Connection) -> CommandResult<()> {
                 RebuildStep { label: "Pull Latest".into(), command: "git pull".into(), continue_on_error: false },
                 RebuildStep { label: "Install Dependencies".into(), command: "bun install".into(), continue_on_error: false },
                 RebuildStep { label: "Build".into(), command: "bun run build".into(), continue_on_error: false },
-                RebuildStep { label: "Restart PM2".into(), command: "pm2 restart {{pm2_name}}".into(), continue_on_error: false },
-            ],
-        ),
-        (
-            "Node + npm",
-            vec![
-                RebuildStep { label: "Pull Latest".into(), command: "git pull".into(), continue_on_error: false },
-                RebuildStep { label: "Install Dependencies".into(), command: "npm install".into(), continue_on_error: false },
-                RebuildStep { label: "Build".into(), command: "npm run build".into(), continue_on_error: false },
                 RebuildStep { label: "Restart PM2".into(), command: "pm2 restart {{pm2_name}}".into(), continue_on_error: false },
             ],
         ),

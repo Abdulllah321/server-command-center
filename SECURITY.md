@@ -96,3 +96,16 @@ The centralized `redact_secrets` engine redacts:
   - `commands::servers::tests::test_crud_server` (PASSED)
 - **Frontend Build**: `npm run build` completes with 0 errors.
 - **Clean Backend Build**: `cargo test` builds with 0 errors and 0 critical warnings.
+
+---
+
+## 5. Vulnerability Disclosure Policy
+
+If you discover a security vulnerability within Veyra (Server Command Center), please report it responsibly:
+
+- **Contact**: Email security reports to `abdullahsufyan2007@gmail.com` with the subject line `[SECURITY DISCLOSURE] Veyra`.
+- **Details**: Please include reproducible steps, affected platform/architecture, and a proof of concept if applicable.
+- **Response Timeline**:
+  - Initial acknowledgement: within 24 hours.
+  - Vulnerability assessment & patch release: within 72 hours for critical severity issues.
+- **Responsible Disclosure**: Please do not publicly disclose vulnerabilities until an official patch release has been published.

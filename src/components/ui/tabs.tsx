@@ -55,9 +55,8 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-full items-center justify-center gap-1.5 rounded-xl border border-transparent px-3 py-1.5 text-xs font-medium whitespace-nowrap text-zinc-400 transition-all select-none hover:text-zinc-100 hover:bg-white/5 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
-        "data-active:bg-zinc-800 data-active:text-white data-active:font-semibold data-active:border-white/15 data-active:shadow-md",
-        "dark:data-active:bg-zinc-800 dark:data-active:text-white dark:data-active:border-white/15 dark:data-active:shadow-md",
+        "relative inline-flex h-full items-center justify-center gap-1.5 rounded-xl border border-transparent px-3 py-1.5 text-xs font-medium whitespace-nowrap text-muted-foreground transition-all select-none hover:text-foreground hover:bg-muted/60 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "data-active:bg-background data-active:text-foreground data-active:font-semibold data-active:border-border data-active:shadow-xs",
         className
       )}
       {...props}
@@ -70,7 +69,7 @@ function TabsContent({ className, keepMounted, ...props }: TabsPrimitive.Panel.P
     <TabsPrimitive.Panel
       data-slot="tabs-content"
       keepMounted={keepMounted}
-      className={cn("flex-1 text-sm outline-none", className)}
+      className={cn("flex-1 text-sm outline-none data-hidden:!hidden data-[hidden]:!hidden", className)}
       {...props}
     />
   )

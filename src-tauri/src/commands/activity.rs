@@ -41,20 +41,27 @@ pub async fn get_activity_log(
 
     // Build a dynamic WHERE clause from optional filters
     let mut conditions = Vec::new();
-    if filters.server_id.is_some() {
-        conditions.push("al.server_id = :server_id");
+    let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+
+    if let Some(ref server_id) = filters.server_id {
+        conditions.push("al.server_id = ?");
+        params.push(server_id);
     }
-    if filters.action.is_some() {
-        conditions.push("al.action = :action");
+    if let Some(ref action) = filters.action {
+        conditions.push("al.action = ?");
+        params.push(action);
     }
-    if filters.status.is_some() {
-        conditions.push("al.status = :status");
+    if let Some(ref status) = filters.status {
+        conditions.push("al.status = ?");
+        params.push(status);
     }
-    if filters.date_from.is_some() {
-        conditions.push("al.created_at >= :date_from");
+    if let Some(ref date_from) = filters.date_from {
+        conditions.push("al.created_at >= ?");
+        params.push(date_from);
     }
-    if filters.date_to.is_some() {
-        conditions.push("al.created_at <= :date_to");
+    if let Some(ref date_to) = filters.date_to {
+        conditions.push("al.created_at <= ?");
+        params.push(date_to);
     }
 
     let where_clause = if conditions.is_empty() {
@@ -70,23 +77,18 @@ pub async fn get_activity_log(
          LEFT JOIN servers s ON al.server_id = s.id
          {}
          ORDER BY al.created_at DESC
-         LIMIT :limit OFFSET :offset",
+         LIMIT ? OFFSET ?",
         where_clause
     );
+
+    params.push(&limit);
+    params.push(&offset);
 
     let mut stmt = conn.prepare(&sql)
         .map_err(|e| CommandError::Internal(e.to_string()))?;
 
     let entries = stmt.query_map(
-        rusqlite::named_params! {
-            ":server_id": filters.server_id,
-            ":action": filters.action,
-            ":status": filters.status,
-            ":date_from": filters.date_from,
-            ":date_to": filters.date_to,
-            ":limit": limit,
-            ":offset": offset,
-        },
+        rusqlite::params_from_iter(params),
         |row| {
             let raw_detail: Option<String> = row.get(7)?;
             let detail = raw_detail.map(|d| crate::secrets::redact::redact_secrets(&d));

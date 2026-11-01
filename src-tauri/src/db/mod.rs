@@ -44,6 +44,7 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         ("0002_known_hosts", include_str!("migrations/0002_known_hosts.sql")),
         ("0003_alerts", include_str!("migrations/0003_alerts.sql")),
         ("0004_default_commands", include_str!("migrations/0004_default_commands.sql")),
+        ("0005_scheduled_rebuilds", include_str!("migrations/0005_scheduled_rebuilds.sql")),
     ];
 
     for (migration_id, migration_sql) in migrations {
@@ -81,6 +82,7 @@ pub fn log_activity(conn: &Connection, entry: ActivityEntry) {
     let actor = "local_user";
     
     let redacted_detail = entry.detail.map(|d| crate::secrets::redact::redact_secrets(&d));
+    let redacted_target = entry.target.map(|t| crate::secrets::redact::redact_secrets(&t));
     
     let res = conn.execute(
         "INSERT INTO activity_log (id, server_id, actor, action, target, status, detail, duration_ms, created_at)
@@ -90,7 +92,7 @@ pub fn log_activity(conn: &Connection, entry: ActivityEntry) {
             entry.server_id,
             actor,
             entry.action,
-            entry.target,
+            redacted_target,
             entry.status,
             redacted_detail,
             entry.duration_ms

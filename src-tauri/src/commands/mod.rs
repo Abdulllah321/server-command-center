@@ -17,4 +17,8 @@ pub mod rebuild;
 pub mod backups;
 pub mod nginx;
 pub mod alerts;
+pub mod tunnels;
+pub mod scheduled_rebuilds;
+pub mod files;
+pub mod security_audit;
 

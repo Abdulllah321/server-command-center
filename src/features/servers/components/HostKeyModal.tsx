@@ -296,7 +296,7 @@ export const HostKeyModal = () => {
             <Button 
               variant="default" 
               onClick={() => handleResolve(true)}
-              className="w-full sm:w-auto font-semibold shadow-md bg-primary hover:bg-primary/90"
+              className="w-full sm:w-auto font-semibold shadow-xs bg-primary text-primary-foreground hover:bg-primary/90"
             >
               <ShieldCheck className="w-4 h-4 mr-2" />
               Trust & Save Host Key
