@@ -1,12 +1,14 @@
-# 🏛️ Veyra System Architecture & Technical Blueprint
+# 🏛️ Server Command Center: Architecture & Technical Blueprint
 
-This document provides a comprehensive technical overview of the architecture, data flow, component hierarchy, and security layers of **Veyra (Server Command Center)**.
+### Powered by [Falah Tech](https://falah-tech.com)
+
+This document provides a comprehensive technical overview of the architecture, data flow, component hierarchy, and security layers of **Server Command Center**, powered by **[Falah Tech](https://falah-tech.com)**.
 
 ---
 
 ## 1. System Topology Overview
 
-Veyra uses an asynchronous, hybrid client-native architecture powered by **Tauri v2**:
+Server Command Center uses an asynchronous, hybrid client-native architecture powered by **Tauri v2**:
 
 ```mermaid
 graph TB
@@ -187,3 +189,4 @@ erDiagram
    - Biometric authentication delegates directly to the Windows TPM 2.0 enclave via `UserConsentVerifier`. Passwords never leave encrypted storage unless biometrically authorized.
 4. **Host Key Pinning**:
    - Eliminates Man-In-The-Middle (MITM) attacks by persisting known public keys and alerting users if a remote key changes unexpectedly.
+

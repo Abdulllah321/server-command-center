@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Server Command Center",
   "version": "1.0.0",
-  "identifier": "com.veyra.scc",
+  "identifier": "com.falahtech.servercommandcenter",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -29,11 +29,11 @@
   },
   "bundle": {
     "active": true,
-    "publisher": "Veyra",
-    "copyright": "Copyright © 2026 Veyra",
+    "publisher": "Falah Tech",
+    "copyright": "Copyright © 2026 Falah Tech (falah-tech.com)",
     "category": "DeveloperTool",
-    "shortDescription": "Fast, lightweight multi-server management and command center.",
-    "longDescription": "Server Command Center by Veyra is a native desktop application for DevOps and system administrators to monitor server health, manage PM2 processes, trigger zero-downtime rebuild pipelines, stream logs, and access secure SSH terminals.",
+    "shortDescription": "Fast, lightweight multi-server management and command center powered by Falah Tech.",
+    "longDescription": "Server Command Center powered by Falah Tech (falah-tech.com) is a native desktop and mobile engineering cockpit for DevOps and system administrators to monitor server health, manage PM2 processes, trigger zero-downtime rebuild pipelines, stream logs, and access secure SSH terminals.",
     "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",

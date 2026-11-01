@@ -101,9 +101,9 @@ The centralized `redact_secrets` engine redacts:
 
 ## 5. Vulnerability Disclosure Policy
 
-If you discover a security vulnerability within Veyra (Server Command Center), please report it responsibly:
+If you discover a security vulnerability within Server Command Center, please report it responsibly:
 
-- **Contact**: Email security reports to `abdullahsufyan2007@gmail.com` with the subject line `[SECURITY DISCLOSURE] Veyra`.
+- **Contact**: Email security reports to `abdullahsufyan2007@gmail.com` with the subject line `[SECURITY DISCLOSURE] Server Command Center - Falah Tech`.
 - **Details**: Please include reproducible steps, affected platform/architecture, and a proof of concept if applicable.
 - **Response Timeline**:
   - Initial acknowledgement: within 24 hours.

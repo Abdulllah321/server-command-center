@@ -1,6 +1,8 @@
-# Contributing to Veyra (Server Command Center)
+# Contributing to Server Command Center
 
-Thank you for your interest in contributing to **Veyra**! To maintain enterprise stability, cryptographic security, and code quality, all contributions must adhere to the standards outlined below.
+### Powered by [Falah Tech](https://falah-tech.com)
+
+Thank you for your interest in contributing to **Server Command Center**! To maintain enterprise stability, cryptographic security, and code quality, all contributions must adhere to the standards outlined below.
 
 ---
 
@@ -15,8 +17,8 @@ Thank you for your interest in contributing to **Veyra**! To maintain enterprise
 ### 2. Initial Setup
 ```powershell
 # Clone the repository
-git clone https://github.com/Abdulllah321/Veyra.git
-cd Veyra/server-command-center
+git clone https://github.com/Abdulllah321/server-command-center.git
+cd server-command-center
 
 # Install frontend dependencies
 npm install
@@ -104,3 +106,4 @@ All 4 checks must pass with **0 errors**.
    - `sec(...)`: Security hardening or vulnerability remediation.
    - `docs(...)`: Documentation updates.
 3. Open a Pull Request on GitHub with a clear description of the problem solved, testing steps, and screenshots for UI changes.
+

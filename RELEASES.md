@@ -1,6 +1,8 @@
-# 🚀 Veyra Releases & Distribution Guide
+# 🚀 Server Command Center: Releases & Distribution Guide
 
-Official release binaries, installation instructions, build hashes, and changelog history for **Veyra (Server Command Center)**.
+### Powered by [Falah Tech](https://falah-tech.com)
+
+Official release binaries, installation instructions, build hashes, and changelog history for **Server Command Center**, powered by **[Falah Tech](https://falah-tech.com)**.
 
 ---
 
@@ -33,7 +35,7 @@ Official release binaries, installation instructions, build hashes, and changelo
 
 #### Portable Mode (.exe)
 1. Download `server-command-center.exe`.
-2. Move it to any desired folder (e.g., `C:\Tools\Veyra\`).
+2. Move it to any desired folder (e.g., `C:\Tools\ServerCommandCenter\`).
 3. Run directly. Settings and local databases are saved safely in your Windows user profile (`%APPDATA%\com.servercommandcenter.app\`).
 
 ---
@@ -118,3 +120,4 @@ Get-FileHash -Algorithm SHA256 ".\server-command-center.exe"
 ```
 
 Report any security findings or discrepancies directly via the guidelines documented in [SECURITY.md](SECURITY.md).
+

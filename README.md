@@ -1,19 +1,20 @@
 <div align="center">
 
-# ⚡ VEYRA: SERVER COMMAND CENTER
+# ⚡ SERVER COMMAND CENTER
 
 ### **Mission-Control Infrastructure Cockpit for Cloud Fleets, PM2 Workloads, and Zero-Downtime Deployments**
+### **Powered by [Falah Tech](https://falah-tech.com)**
 
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.11-24C8D8?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.98%20MSVC-CE412B?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![React 19](https://img.shields.io/badge/React-19.2%20TypeScript-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
 [![TailwindCSS v4](https://img.shields.io/badge/TailwindCSS-v4.0-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Windows Hello](https://img.shields.io/badge/Security-Windows%20Hello%20TPM-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://learn.microsoft.com/windows/security/)
-[![License](https://img.shields.io/badge/License-Proprietary-gray?style=for-the-badge)](LICENSE)
+[![Powered by Falah Tech](https://img.shields.io/badge/Powered%20by-Falah%20Tech-10B981?style=for-the-badge&logoColor=white)](https://falah-tech.com)
 
 <br/>
 
-**Veyra (Server Command Center)** is a modern, high-performance desktop and mobile engineering cockpit designed for DevOps engineers, full-stack developers, and cloud administrators. Built with a native **Rust (Tauri v2)** backend and an ultra-responsive **React 19** frontend, Veyra replaces clunky web dashboards and scattered terminal windows with a unified, hardware-secured control panel.
+**Server Command Center** is a modern, high-performance desktop and mobile engineering cockpit designed for DevOps engineers, full-stack developers, and cloud administrators, powered by **[Falah Tech](https://falah-tech.com)**. Built with a native **Rust (Tauri v2)** backend and an ultra-responsive **React 19** frontend, it replaces clunky web dashboards and scattered terminal windows with a unified, hardware-secured control panel.
 
 [Download Windows Installer (.exe)](RELEASES.md) • [Android Mobile APK (.apk)](RELEASES.md) • [Technical Architecture](ARCHITECTURE.md) • [Security & Vault Policy](SECURITY.md)
 
@@ -102,7 +103,7 @@ flowchart TD
 
 ## 📱 Mobile-First Responsive Architecture
 
-Veyra is engineered from the ground up for both wide desktop command stations and mobile phone touch screens:
+Server Command Center is engineered from the ground up for both wide desktop command stations and mobile phone touch screens:
 
 - **Dynamic Viewport (`100dvh`)**: Immune to address bar jumps and Android on-screen keyboards.
 - **Thumb Navigation Bar**: 5 key destinations (`Servers`, `Activity`, `Search`, `Vault`, `Settings`) positioned at the bottom of the screen with iOS/Android safe-area inset support (`env(safe-area-inset-bottom)`).
@@ -170,4 +171,5 @@ npm run tauri build
 ## ⚖️ License & Authors
 
 Designed and built by **Abdullah Sufyan** (`Abdulllah321`).  
-Copyright © 2026 Veyra Command Center. All Rights Reserved.
+Powered by **[Falah Tech](https://falah-tech.com)**.  
+Copyright © 2026 Falah Tech. All Rights Reserved.
