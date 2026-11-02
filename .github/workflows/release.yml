@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag Name (e.g. v1.0.0)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build & Release Windows (x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust Toolchain (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          work-dir: ./src-tauri
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Verify TypeScript Types
+        run: npm run typecheck
+
+      - name: Build Frontend Production Assets
+        run: npm run build
+
+      - name: Build Tauri Desktop Binaries (NSIS + Portable)
+        run: npx @tauri-apps/cli build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Generate SHA-256 Checksums
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts
+          
+          # Copy NSIS installer
+          $setupExe = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if ($setupExe) {
+            Copy-Item $setupExe.FullName "dist-artifacts/"
+          }
+          
+          # Copy portable binary
+          $portableExe = "src-tauri/target/release/server-command-center.exe"
+          if (Test-Path $portableExe) {
+            Copy-Item $portableExe "dist-artifacts/"
+          }
+          
+          # Compute hashes
+          Get-FileHash -Algorithm SHA256 dist-artifacts/*.exe | Format-Table -AutoSize | Out-String | Set-Content "dist-artifacts/checksums-windows-x64.txt"
+          Get-Content "dist-artifacts/checksums-windows-x64.txt"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag_name != ''
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          name: Server Command Center ${{ github.event.inputs.tag_name || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist-artifacts/*-setup.exe
+            dist-artifacts/server-command-center.exe
+            dist-artifacts/checksums-windows-x64.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

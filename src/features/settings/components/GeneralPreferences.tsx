@@ -2,32 +2,47 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { 
   Terminal, 
   Cpu, 
   Laptop,
   Sun,
   Moon,
-  Monitor,
   Palette,
-  Check
+  Check,
+  RefreshCw,
+  DownloadCloud,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  ShieldCheck,
+  Smartphone
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import { cn } from 'cn';
+import { checkForUpdates, APP_VERSION, GITHUB_REPO, type UpdateCheckResult } from '@/lib/update-checker';
 
 export const GeneralPreferences = () => {
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const [terminalPreference, setTerminalPreference] = useState<string>('windows_terminal');
   const [pollInterval, setPollInterval] = useState<string>('30');
+  
+  // Update state
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean>(true);
 
   useEffect(() => {
     setMounted(true);
     const savedTerminal = localStorage.getItem('terminal_preference') || 'windows_terminal';
     const savedPoll = localStorage.getItem('telemetry_poll_interval') || '30';
+    const savedAutoCheck = localStorage.getItem('auto_check_updates') !== 'false';
     setTerminalPreference(savedTerminal);
     setPollInterval(savedPoll);
+    setAutoCheckUpdate(savedAutoCheck);
   }, []);
 
   const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
@@ -46,6 +61,33 @@ export const GeneralPreferences = () => {
     setPollInterval(val);
     localStorage.setItem('telemetry_poll_interval', val);
     toast.success(`Telemetry refresh interval updated to ${val}s`);
+  };
+
+  const handleAutoCheckToggle = () => {
+    const next = !autoCheckUpdate;
+    setAutoCheckUpdate(next);
+    localStorage.setItem('auto_check_updates', String(next));
+    toast.success(next ? 'Automatic update checks enabled' : 'Automatic update checks disabled');
+  };
+
+  const handleCheckUpdate = async () => {
+    setIsCheckingUpdate(true);
+    try {
+      const res = await checkForUpdates();
+      setUpdateResult(res);
+      if (res.hasUpdate) {
+        toast.info(`New version available: v${res.latestVersion}!`, {
+          description: 'Click below to download the latest setup installer or APK.',
+        });
+      } else {
+        toast.success('You are on the latest version of Server Command Center!');
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to check for updates';
+      toast.error(msg);
+    } finally {
+      setIsCheckingUpdate(false);
+    }
   };
 
   const currentTheme = mounted ? theme : 'dark';
@@ -237,6 +279,174 @@ export const GeneralPreferences = () => {
         </Card>
       </div>
 
+      {/* Software Updates & Release Channel (Powered by Falah Tech) */}
+      <Card className="bg-card/80 border border-border shadow-xl rounded-2xl">
+        <CardHeader className="p-6 pb-4 border-b border-border/50">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base font-semibold flex items-center gap-2">
+                <RefreshCw className={cn("w-4 h-4 text-primary", isCheckingUpdate && "animate-spin")} />
+                Software Updates & Releases
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                Check for official updates, new feature releases, and mobile APK builds from GitHub.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[11px] font-mono border-primary/30 bg-primary/10 text-primary">
+                v{APP_VERSION} Stable
+              </Badge>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground border-border bg-muted/60">
+                Falah Tech Channel
+              </Badge>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-6 pt-5 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-border/70 bg-muted/30">
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                Release Stream: Production
+              </p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Targeting <code className="px-1 py-0.5 rounded bg-muted text-[10px] font-mono text-foreground">{GITHUB_REPO}</code>
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleAutoCheckToggle}
+                className={cn(
+                  "text-xs h-8 cursor-pointer",
+                  autoCheckUpdate ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                )}
+                title="Toggle automatic update checks on launch"
+              >
+                {autoCheckUpdate ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" /> Auto-check ON
+                  </span>
+                ) : (
+                  <span>Auto-check OFF</span>
+                )}
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={handleCheckUpdate}
+                disabled={isCheckingUpdate}
+                className="text-xs h-8 gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-xs"
+              >
+                {isCheckingUpdate ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Check for Updates
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Update Result Display */}
+          {updateResult && (
+            <div className="space-y-3 animate-in fade-in duration-200">
+              {updateResult.hasUpdate ? (
+                <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-black">
+                          NEW UPDATE AVAILABLE
+                        </span>
+                        <span className="text-xs font-bold text-foreground">
+                          v{updateResult.latestVersion} ({updateResult.releaseName})
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Published on {new Date(updateResult.publishedAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <a
+                      href={updateResult.htmlUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
+                    >
+                      Release Notes <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+
+                  {updateResult.releaseNotes && (
+                    <div className="p-3 rounded-lg bg-background/80 border border-border text-[11px] text-muted-foreground max-h-36 overflow-y-auto whitespace-pre-line font-mono">
+                      {updateResult.releaseNotes}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {updateResult.exeInstallerUrl && (
+                      <a
+                        href={updateResult.exeInstallerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
+                      >
+                        <DownloadCloud className="w-3.5 h-3.5" />
+                        Download Windows Setup (.exe)
+                      </a>
+                    )}
+                    {updateResult.exePortableUrl && (
+                      <a
+                        href={updateResult.exePortableUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-colors"
+                      >
+                        <DownloadCloud className="w-3.5 h-3.5" />
+                        Download Portable (.exe)
+                      </a>
+                    )}
+                    {updateResult.apkUrl && (
+                      <a
+                        href={updateResult.apkUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                      >
+                        <Smartphone className="w-3.5 h-3.5" />
+                        Download Android APK (.apk)
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                    <ShieldCheck className="w-4 h-4 shrink-0" />
+                    <span>Your application is completely up to date (version {APP_VERSION}).</span>
+                  </div>
+                  <a
+                    href={updateResult.htmlUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  >
+                    View Releases <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* System Diagnostics & Platform Overview */}
       <Card className="bg-card/80 border border-border shadow-xl rounded-2xl">
         <CardHeader className="p-6 pb-4 border-b border-border/50">
@@ -251,8 +461,8 @@ export const GeneralPreferences = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-1">
               <span className="text-[11px] text-muted-foreground uppercase font-mono">Application</span>
-              <p className="font-semibold text-xs text-foreground">Veyra Command Center</p>
-              <span className="text-[10px] text-muted-foreground">v1.0.0 (Tauri v2 Desktop)</span>
+              <p className="font-semibold text-xs text-foreground">Server Command Center</p>
+              <span className="text-[10px] text-muted-foreground">v1.0.0 (Falah Tech)</span>
             </div>
 
             <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-1">
