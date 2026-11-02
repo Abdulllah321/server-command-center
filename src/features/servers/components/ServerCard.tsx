@@ -175,7 +175,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
               variant="default"
               className="h-8 px-3 text-xs flex items-center gap-1.5"
               onClick={() => navigate(`/server/${server.id}?tab=terminal`)}
-              title="Open Integrated Terminal in Veyra"
+              title="Open Integrated Terminal in Server Command Center"
             >
               <TerminalSquare className="h-3.5 w-3.5" />
               Terminal

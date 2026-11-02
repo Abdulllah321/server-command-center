@@ -283,10 +283,10 @@ export const SecurityAuditManager: React.FC<SecurityAuditManagerProps> = ({ serv
       </div>
 
       {/* Main Grid: Listening Ports & UFW Rules */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Active Listening Ports Scanner */}
         <Card className="lg:col-span-2 bg-card border-border shadow-xs flex flex-col">
-          <CardHeader className="p-4 sm:p-5 pb-3 border-b border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <CardHeader className="p-4 sm:p-5 pb-3 border-b border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
             <div>
               <CardTitle className="text-base font-semibold flex items-center gap-2">
                 <Radio className="w-4 h-4 text-primary" />
@@ -338,7 +338,7 @@ export const SecurityAuditManager: React.FC<SecurityAuditManagerProps> = ({ serv
             </div>
           </CardHeader>
 
-          <CardContent className="p-0">
+          <CardContent className="p-0 flex-1 flex flex-col min-h-0">
             {loading && !data ? (
               <div className="flex flex-col items-center justify-center p-12 text-muted-foreground gap-3">
                 <Loader2 className="w-7 h-7 animate-spin text-primary" />
@@ -349,7 +349,7 @@ export const SecurityAuditManager: React.FC<SecurityAuditManagerProps> = ({ serv
                 No listening ports match the selected filter.
               </div>
             ) : (
-              <div className="divide-y divide-border/40 text-xs max-h-[460px] overflow-y-auto">
+              <div className="divide-y divide-border/40 text-xs max-h-[500px] overflow-y-auto">
                 {filteredPorts.map((p, idx) => (
                   <div key={`${p.protocol}-${p.local_port}-${idx}`} className="p-3.5 hover:bg-muted/30 transition-colors flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3 min-w-0">
@@ -402,10 +402,10 @@ export const SecurityAuditManager: React.FC<SecurityAuditManagerProps> = ({ serv
         </Card>
 
         {/* Right 1 Col: UFW Rules & Actions */}
-        <div className="space-y-6 flex flex-col">
+        <div className="flex flex-col">
           {/* UFW Rules Card */}
-          <Card className="bg-card border-border shadow-xs flex flex-col">
-            <CardHeader className="p-4 sm:p-5 pb-3 border-b border-border/50 flex flex-row items-center justify-between">
+          <Card className="bg-card border-border shadow-xs flex flex-col h-full">
+            <CardHeader className="p-4 sm:p-5 pb-3 border-b border-border/50 flex flex-row items-center justify-between shrink-0">
               <div>
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
                   <Flame className="w-4 h-4 text-orange-500" />
@@ -426,7 +426,7 @@ export const SecurityAuditManager: React.FC<SecurityAuditManagerProps> = ({ serv
               </Button>
             </CardHeader>
 
-            <CardContent className="p-0">
+            <CardContent className="p-0 flex-1 flex flex-col min-h-0">
               {!data?.ufw.is_installed ? (
                 <div className="p-6 text-center text-xs text-muted-foreground">
                   UFW is not installed on this server. Install with <code>sudo apt install ufw</code>.

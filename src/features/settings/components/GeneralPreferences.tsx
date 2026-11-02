@@ -240,7 +240,7 @@ export const GeneralPreferences = () => {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Both emulators automatically receive saved credentials via Veyra's secure askpass bridge.
+                Both emulators automatically receive saved credentials via Server Command Center's secure askpass bridge.
               </p>
             </div>
           </CardContent>

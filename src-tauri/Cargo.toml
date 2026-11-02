@@ -2,7 +2,7 @@
 name = "server-command-center"
 version = "1.0.0"
 description = "Server Command Center Desktop Application"
-authors = ["Veyra"]
+authors = ["Falah Tech (falah-tech.com)"]
 edition = "2021"
 rust-version = "1.77.2"
 
