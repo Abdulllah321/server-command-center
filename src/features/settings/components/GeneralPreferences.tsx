@@ -9,6 +9,7 @@ import {
   Laptop,
   Sun,
   Moon,
+  Monitor,
   Palette,
   Check,
   RefreshCw,
