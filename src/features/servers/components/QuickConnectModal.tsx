@@ -42,7 +42,7 @@ export const QuickConnectModal = ({ open, onOpenChange, server, onConnected }: Q
         secret_payload: password.trim(),
       });
 
-      // 2. Persist to Windows Credential Manager
+      // 2. Persist to Secure Hardware Keychain
       await createCredential({
         server_id: server.id,
         auth_method: 'password',
@@ -95,7 +95,7 @@ export const QuickConnectModal = ({ open, onOpenChange, server, onConnected }: Q
             <label className="text-sm font-medium flex items-center justify-between">
               <span>SSH Password</span>
               <span className="text-xs text-muted-foreground flex items-center gap-1 font-normal">
-                <ShieldCheck className="h-3 w-3 text-green-500" /> Stored in Windows Credential Manager
+                <ShieldCheck className="h-3 w-3 text-green-500" /> Stored in Hardware Keychain
               </span>
             </label>
             <div className="relative">

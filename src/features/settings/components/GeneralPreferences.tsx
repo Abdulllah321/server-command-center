@@ -55,7 +55,7 @@ export const GeneralPreferences = () => {
   const handleTerminalChange = (val: string) => {
     setTerminalPreference(val);
     localStorage.setItem('terminal_preference', val);
-    toast.success(`External terminal preference set to ${val === 'windows_terminal' ? 'Windows Terminal' : 'PowerShell'}`);
+    toast.success(`External terminal preference set to ${val === 'windows_terminal' ? 'System Terminal' : 'Command Shell'}`);
   };
 
   const handlePollChange = (val: string) => {
@@ -201,7 +201,7 @@ export const GeneralPreferences = () => {
                   {currentTheme === 'system' && <Check className="w-3.5 h-3.5 text-primary" />}
                 </p>
                 <p className="text-[11px] text-muted-foreground leading-normal">
-                  Automatically adapts to your Windows / macOS desktop dark/light mode preference.
+                  Automatically adapts to your device dark/light mode preference.
                 </p>
               </div>
             </button>
@@ -232,10 +232,10 @@ export const GeneralPreferences = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border text-xs">
                   <SelectItem value="windows_terminal">
-                    Windows Terminal (wt.exe) — Recommended
+                    System Terminal — Recommended
                   </SelectItem>
                   <SelectItem value="powershell">
-                    Windows PowerShell (powershell.exe)
+                    Command Shell
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -400,7 +400,7 @@ export const GeneralPreferences = () => {
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
                       >
                         <DownloadCloud className="w-3.5 h-3.5" />
-                        Download Windows Setup (.exe)
+                        Download Desktop Setup (.exe)
                       </a>
                     )}
                     {updateResult.exePortableUrl && (
@@ -422,7 +422,7 @@ export const GeneralPreferences = () => {
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
                       >
                         <Smartphone className="w-3.5 h-3.5" />
-                        Download Android APK (.apk)
+                        Download Mobile Package (.apk)
                       </a>
                     )}
                   </div>
@@ -480,7 +480,7 @@ export const GeneralPreferences = () => {
 
             <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-1">
               <span className="text-[11px] text-muted-foreground uppercase font-mono">Credential Security</span>
-              <p className="font-semibold text-xs text-foreground">Windows Credential Mgr</p>
+              <p className="font-semibold text-xs text-foreground">Hardware Keychain</p>
               <span className="text-[10px] text-muted-foreground">+ Argon2id / AES-256 Vault</span>
             </div>
           </div>

@@ -110,7 +110,7 @@ export const CredentialsList = () => {
     return () => clearInterval(interval);
   }, [revealedSecret]);
 
-  // Unlock with Windows Hello (Biometrics / Windows PIN)
+  // Unlock with Device Biometrics (Fingerprint / Face / Device PIN)
   const handleHelloUnlockAndReveal = async () => {
     if (!activeCred) return;
     try {
@@ -119,9 +119,9 @@ export const CredentialsList = () => {
       const pw = await unlockVaultWithWindowsHello();
       unlock(pw);
       await executeReveal(activeCred.id, pw);
-      toast.success('Identity verified with Windows Hello');
+      toast.success('Identity verified with biometric authentication');
     } catch (err: any) {
-      const msg = typeof err === 'string' ? err : err?.message || 'Windows Hello verification failed';
+      const msg = typeof err === 'string' ? err : err?.message || 'Biometric verification failed';
       setErrorMsg(msg);
       toast.error(msg);
     } finally {
@@ -347,7 +347,7 @@ export const CredentialsList = () => {
             </div>
           ) : (
             <div className="space-y-4 pt-2">
-              {/* Windows Hello 1-Click Biometric Option */}
+              {/* 1-Click Biometric Option */}
               {helloStatus?.enabled && (
                 <div className="space-y-2">
                   <Button
@@ -361,7 +361,7 @@ export const CredentialsList = () => {
                     ) : (
                       <Fingerprint className="w-4 h-4 text-emerald-100" />
                     )}
-                    <span>Unlock & Reveal with Windows Hello</span>
+                    <span>Unlock & Reveal with Biometrics</span>
                   </Button>
 
                   <div className="relative my-2.5">

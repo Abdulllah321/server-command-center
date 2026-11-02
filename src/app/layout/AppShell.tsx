@@ -26,7 +26,7 @@ export const AppShell = () => {
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
         <TopBar onSearchClick={() => setSearchOpen(true)} />
-        <main className="flex-1 flex flex-col min-h-0 overflow-hidden pb-14 md:pb-0">
+        <main className="flex-1 flex flex-col min-h-0 overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom,16px))] md:pb-0">
           <Outlet />
         </main>
       </div>

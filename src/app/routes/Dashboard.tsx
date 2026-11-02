@@ -68,103 +68,107 @@ export const Dashboard = () => {
         </div>
 
         {/* Fleet Overview Metrics Strip */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
           {/* Card 1: Total Nodes */}
-          <div className="p-4 rounded-2xl bg-card border border-border flex items-center justify-between shadow-xs">
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Fleet Nodes</span>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-foreground font-mono">{totalServers}</span>
-                <span className="text-xs text-muted-foreground">registered</span>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-2 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-medium text-muted-foreground uppercase tracking-wider">Fleet Nodes</span>
+              <div className="p-1.5 sm:p-2 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">
+                <ServerIcon className="h-4 w-4" />
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              <ServerIcon className="h-5 w-5" />
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-foreground font-mono">{totalServers}</span>
+              <span className="text-[11px] sm:text-xs text-muted-foreground">registered</span>
             </div>
           </div>
 
           {/* Card 2: Online Status */}
-          <div className="p-4 rounded-2xl bg-card border border-border flex items-center justify-between shadow-xs">
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Node Status</span>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-foreground font-mono">
-                  {totalServers > 0 ? `${onlineServers}/${totalServers}` : '0/0'}
-                </span>
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online</span>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-2 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-medium text-muted-foreground uppercase tracking-wider">Node Status</span>
+              <div className="p-1.5 sm:p-2 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                <Activity className="h-4 w-4" />
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              <Activity className="h-5 w-5" />
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl sm:text-2xl font-bold tracking-tight text-foreground font-mono">
+                {totalServers > 0 ? `${onlineServers}/${totalServers}` : '0/0'}
+              </span>
+              <span className="text-[11px] sm:text-xs text-emerald-600 dark:text-emerald-400 font-medium">Online</span>
             </div>
           </div>
 
           {/* Card 3: Security & Vault */}
-          <div className="p-4 rounded-2xl bg-card border border-border flex items-center justify-between shadow-xs">
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">SSH Vault</span>
-              <div className="flex items-center gap-1.5 pt-0.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                <span className="text-sm font-semibold tracking-tight text-foreground">Creds Secured</span>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-2 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-medium text-muted-foreground uppercase tracking-wider">Secure Vault</span>
+              <div className="p-1.5 sm:p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 shrink-0">
+                <ShieldCheck className="h-4 w-4" />
               </div>
-              <p className="text-[11px] text-muted-foreground">Windows Credential Manager</p>
             </div>
-            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-              <ShieldCheck className="h-5 w-5" />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] shrink-0" />
+                <span className="text-xs sm:text-sm font-semibold tracking-tight text-foreground truncate">Creds Secured</span>
+              </div>
+              <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-0.5 truncate">Hardware Keychain</p>
             </div>
           </div>
 
           {/* Card 4: Environments */}
-          <div className="p-4 rounded-2xl bg-card border border-border flex items-center justify-between shadow-xs">
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Environments</span>
-              <div className="flex items-center gap-2 pt-0.5 text-xs">
-                <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground font-medium">
-                  {envCounts.production} Prod
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground font-medium">
-                  {envCounts.staging} Stg
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground font-medium">
-                  {envCounts.dev} Dev
-                </span>
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-card border border-border flex flex-col justify-between gap-2 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] sm:text-xs font-medium text-muted-foreground uppercase tracking-wider">Environments</span>
+              <div className="p-1.5 sm:p-2 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                <Layers className="h-4 w-4" />
               </div>
             </div>
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              <Layers className="h-5 w-5" />
+            <div className="flex items-center gap-1.5 text-xs flex-wrap">
+              <span className="px-1.5 py-0.5 rounded-md bg-muted border border-border text-foreground text-[10px] sm:text-[11px] font-mono font-medium">
+                {envCounts.production} Prod
+              </span>
+              <span className="px-1.5 py-0.5 rounded-md bg-muted border border-border text-foreground text-[10px] sm:text-[11px] font-mono font-medium">
+                {envCounts.staging} Stg
+              </span>
+              <span className="px-1.5 py-0.5 rounded-md bg-muted border border-border text-foreground text-[10px] sm:text-[11px] font-mono font-medium">
+                {envCounts.dev} Dev
+              </span>
             </div>
           </div>
         </div>
 
         {/* Filter & Search Bar */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          {/* Environment Filter Pills */}
-          <div className="flex items-center p-1 rounded-xl bg-muted/60 border border-border w-fit">
-            {[
-              { id: 'all', label: 'All Hosts', count: envCounts.all },
-              { id: 'production', label: 'Production', count: envCounts.production },
-              { id: 'staging', label: 'Staging', count: envCounts.staging },
-              { id: 'dev', label: 'Dev', count: envCounts.dev },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setEnvironmentFilter(tab.id)}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  environmentFilter === tab.id
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-background/60'
-                }`}
-              >
-                <span>{tab.label}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                  environmentFilter === tab.id 
-                    ? 'bg-primary-foreground/20 text-primary-foreground font-semibold' 
-                    : 'bg-muted-foreground/15 text-muted-foreground'
-                }`}>
-                  {tab.count}
-                </span>
-              </button>
-            ))}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+          {/* Environment Filter Pills (Scrollable on mobile) */}
+          <div className="w-full md:w-auto overflow-x-auto no-scrollbar pb-0.5">
+            <div className="flex items-center p-1 rounded-xl bg-muted/60 border border-border w-fit gap-1">
+              {[
+                { id: 'all', label: 'All Hosts', count: envCounts.all },
+                { id: 'production', label: 'Production', count: envCounts.production },
+                { id: 'staging', label: 'Staging', count: envCounts.staging },
+                { id: 'dev', label: 'Dev', count: envCounts.dev },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setEnvironmentFilter(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
+                    environmentFilter === tab.id
+                      ? 'bg-primary text-primary-foreground shadow-xs font-semibold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/60'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    environmentFilter === tab.id 
+                      ? 'bg-primary-foreground/20 text-primary-foreground font-semibold' 
+                      : 'bg-muted-foreground/15 text-muted-foreground'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Search Input */}

@@ -184,7 +184,7 @@ export const ServerCard = ({ server, onDeleted }: ServerCardProps) => {
               size="sm"
               variant="outline" 
               className="h-8 px-2.5 text-xs border-border hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="Launch External SSH Terminal (Windows Terminal / PowerShell)"
+              title="Launch External SSH Terminal"
               onClick={async () => {
                 try {
                   const preference = localStorage.getItem('terminal_preference') || 'windows_terminal';

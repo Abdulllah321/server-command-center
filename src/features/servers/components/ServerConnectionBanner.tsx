@@ -72,7 +72,7 @@ export const ServerConnectionBanner = ({ server, onRefreshHealth }: ServerConnec
               <div>
                 <h4 className="font-semibold text-sm text-amber-300">Authentication Required</h4>
                 <p className="text-xs text-amber-200/80 mt-0.5">
-                  No saved password found for <code className="px-1.5 py-0.5 rounded bg-black/30 font-mono">{server.username}@{server.hostname}</code>. Enter your password once to store it in your Windows Credential Manager.
+                  No saved password found for <code className="px-1.5 py-0.5 rounded bg-black/30 font-mono">{server.username}@{server.hostname}</code>. Enter your password once to store it securely in your hardware keychain.
                 </p>
               </div>
             </div>

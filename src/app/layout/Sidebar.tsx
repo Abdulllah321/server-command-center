@@ -211,7 +211,7 @@ export const Sidebar = () => {
             onClick={() => setMobileMenuOpen(false)}
           />
           {/* Drawer Panel */}
-          <div className="relative w-72 max-w-[80vw] h-full bg-card border-r border-border shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-200">
+          <div className="relative w-72 max-w-[85vw] h-full bg-card border-r border-border shadow-2xl flex flex-col z-10 animate-in slide-in-from-left duration-200 pt-[max(env(safe-area-inset-top,0px),0.75rem)] pb-[max(env(safe-area-inset-bottom,0px),1rem)]">
             {sidebarContent(true)}
           </div>
         </div>

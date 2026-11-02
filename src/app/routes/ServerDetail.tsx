@@ -521,7 +521,7 @@ export const ServerDetail = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground text-xs">
-              This action cannot be undone. This will permanently delete <strong>{server?.name}</strong> and remove all associated credentials from your Windows vault.
+              This action cannot be undone. This will permanently delete <strong>{server?.name}</strong> and remove all associated credentials from your secure vault.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
