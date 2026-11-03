@@ -91,3 +91,52 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  release-android:
+    name: Build & Release Android (ARM64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+      - name: Build Android Release APK
+        run: |
+          npm run tauri android build -- --apk --target aarch64
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk server-command-center-arm64-v1.0.0.apk
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.tag_name != ''
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          files: |
+            server-command-center-arm64-v1.0.0.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

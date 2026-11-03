@@ -87,7 +87,8 @@ async fn exec_ssh_command_full(
             Some(ChannelMsg::ExitStatus { exit_status }) => {
                 exit_code = Some(exit_status);
             }
-            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+            Some(ChannelMsg::Eof) => {}
+            Some(ChannelMsg::Close) | None => {
                 break;
             }
             _ => {}
@@ -95,6 +96,9 @@ async fn exec_ssh_command_full(
     }
     
     let _ = channel.close().await;
+    if exit_code.is_none() {
+        exit_code = Some(0);
+    }
     Ok(SshCommandOutput { stdout, stderr, exit_status: exit_code })
 }
 

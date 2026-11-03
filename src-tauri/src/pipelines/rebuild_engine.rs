@@ -215,7 +215,10 @@ pub async fn run_pipeline(
                                             exit_code = Some(exit_status as i32);
                                             step_success = exit_status == 0;
                                         }
-                                        Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                                        Some(ChannelMsg::Eof) => {
+                                            // Stream EOF received; await ExitStatus and Close
+                                        }
+                                        Some(ChannelMsg::Close) | None => {
                                             break;
                                         }
                                         _ => {}
@@ -224,6 +227,12 @@ pub async fn run_pipeline(
                             }
                         }
                         let _ = channel.close().await;
+
+                        // If the channel closed cleanly and no explicit exit status was returned, treat as success
+                        if exit_code.is_none() {
+                            exit_code = Some(0);
+                            step_success = true;
+                        }
                     } else {
                         step_output.push_str("Failed to execute command on SSH channel.\n");
                     }
@@ -270,8 +279,29 @@ pub async fn run_pipeline(
             }
         } else {
             overall_success = false;
+            let err_msg = match session_result {
+                Err(ref e) => format!("Failed to acquire SSH session: {}", e),
+                _ => "Failed to acquire SSH session.".to_string(),
+            };
             failed_step_info = Some(("Acquire SSH Session".to_string(), None));
-            all_logs.push_str("Failed to acquire SSH session.\n");
+            all_logs.push_str(&format!("{}\n", err_msg));
+
+            if let Ok(conn) = db_clone.lock() {
+                let _ = conn.execute(
+                    "UPDATE deployment_steps SET status = 'failed', output = ?1, finished_at = datetime('now') WHERE deployment_id = ?2 AND step_order = 0",
+                    rusqlite::params![err_msg, pipeline_id_clone]
+                );
+                let _ = conn.execute(
+                    "UPDATE deployment_steps SET status = 'skipped' WHERE deployment_id = ?1 AND step_order > 0",
+                    rusqlite::params![pipeline_id_clone]
+                );
+            }
+            app_handle_clone.emit(&format!("pipeline://step-update:{}", pipeline_id_clone), StepUpdatePayload {
+                step_index: 0,
+                status: "failed".into(),
+                output: Some(err_msg),
+                exit_code: Some(1),
+            }).ok();
         }
         
         // Remove from registry

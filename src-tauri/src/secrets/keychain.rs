@@ -8,7 +8,7 @@ Any struct holding a decrypted secret from this module must implement `Zeroize` 
 */
 
 #[cfg(not(target_os = "android"))]
-use keyring::Entry;
+use keyring::{Entry, Error as KeyringError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -50,7 +50,7 @@ pub fn read_secret(ref_id: &str) -> Result<String, KeychainError> {
         .map_err(|_| KeychainError::AccessFailed)?;
         
     entry.get_password().map_err(|e| match e {
-        keyring::Error::NoEntry => KeychainError::NotFound,
+        KeyringError::NoEntry => KeychainError::NotFound,
         _ => KeychainError::AccessFailed,
     })
 }
@@ -62,7 +62,7 @@ pub fn delete_secret(ref_id: &str) -> Result<(), KeychainError> {
         .map_err(|_| KeychainError::AccessFailed)?;
         
     entry.delete_credential().map_err(|e| match e {
-        keyring::Error::NoEntry => KeychainError::NotFound,
+        KeyringError::NoEntry => KeychainError::NotFound,
         _ => KeychainError::DeleteFailed,
     })
 }

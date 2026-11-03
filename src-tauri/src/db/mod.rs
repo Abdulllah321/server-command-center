@@ -35,6 +35,18 @@ pub fn init(app: &AppHandle) -> Result<Connection> {
     }
 
     let db_path = app_dir.join("command_center.sqlite");
+    
+    // Automatic legacy database migration from com.veyra.scc if new database doesn't exist
+    if !db_path.exists() {
+        if let Some(parent) = app_dir.parent() {
+            let legacy_db = parent.join("com.veyra.scc").join("command_center.sqlite");
+            if legacy_db.exists() {
+                let _ = fs::copy(&legacy_db, &db_path);
+                log::info!("Migrated legacy database from {:?}", legacy_db);
+            }
+        }
+    }
+
     init_db(&db_path)
 }
 

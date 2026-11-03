@@ -338,7 +338,10 @@ pub async fn run_server_command(
             Some(ChannelMsg::ExitStatus { exit_status }) => {
                 exit_code = Some(exit_status as i32);
             }
-            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+            Some(ChannelMsg::Eof) => {
+                // Stream ended, wait for ExitStatus / Close
+            }
+            Some(ChannelMsg::Close) | None => {
                 break;
             }
             _ => {}
@@ -346,6 +349,10 @@ pub async fn run_server_command(
     }
 
     let _ = channel.close().await;
+
+    if exit_code.is_none() {
+        exit_code = Some(0);
+    }
 
     let duration_ms = start_time.elapsed().as_millis() as i64;
     
