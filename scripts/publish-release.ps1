@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automated Release Publisher for Server Command Center
     Powered by Falah Tech (falah-tech.com)
@@ -8,12 +8,12 @@
     and pushes to GitHub to fire the automated release workflow.
 
 .EXAMPLE
-    .\scripts\publish-release.ps1 -Version "1.0.0"
+    .\scripts\publish-release.ps1 -Version "1.1.0"
 #>
 
 param (
     [Parameter(Mandatory=$false)]
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.1.0"
 )
 
 $ErrorActionPreference = "Stop"

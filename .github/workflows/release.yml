@@ -128,7 +128,8 @@ jobs:
       - name: Build Android Release APK
         run: |
           npm run tauri android build -- --apk --target aarch64
-          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk server-command-center-arm64-v1.0.0.apk
+          TAG="${{ github.event.inputs.tag_name || github.ref_name }}"
+          cp src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk "server-command-center-arm64-${TAG}.apk"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -136,7 +137,7 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
           files: |
-            server-command-center-arm64-v1.0.0.apk
+            server-command-center-arm64-*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

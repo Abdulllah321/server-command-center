@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface ReleaseAsset {
