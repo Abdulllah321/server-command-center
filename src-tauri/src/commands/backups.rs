@@ -1011,8 +1011,8 @@ fi
                 let bucket = v["bucket"].as_str().unwrap_or("");
                 let region = v["region"].as_str().unwrap_or("us-east-1");
                 let endpoint = v["endpoint"].as_str().unwrap_or("");
-                let access_key = v["access_key_id"].as_str().unwrap_or("");
-                let secret_key = v["secret_access_key"].as_str().unwrap_or("");
+                let access_key = v["access_key_id"].as_str().or_else(|| v["access_key"].as_str()).unwrap_or("");
+                let secret_key = v["secret_access_key"].as_str().or_else(|| v["secret_key"].as_str()).unwrap_or("");
                 let prefix = v["prefix"].as_str().unwrap_or("");
 
                 if !bucket.is_empty() && !access_key.is_empty() {
@@ -1853,8 +1853,8 @@ pub async fn test_cloud_storage_connection(
         let bucket = v["bucket"].as_str().unwrap_or("").trim();
         let region = v["region"].as_str().unwrap_or("us-east-1").trim();
         let endpoint = v["endpoint"].as_str().unwrap_or("").trim();
-        let akey = v["access_key_id"].as_str().unwrap_or("").trim();
-        let skey = v["secret_access_key"].as_str().unwrap_or("").trim();
+        let akey = v["access_key_id"].as_str().or_else(|| v["access_key"].as_str()).unwrap_or("").trim();
+        let skey = v["secret_access_key"].as_str().or_else(|| v["secret_key"].as_str()).unwrap_or("").trim();
 
         if bucket.is_empty() {
             return Err(CommandError::Validation("Bucket name cannot be empty".into()));
@@ -2077,8 +2077,8 @@ fi
         let bucket = v["bucket"].as_str().unwrap_or("").trim();
         let region = v["region"].as_str().unwrap_or("us-east-1").trim();
         let endpoint = v["endpoint"].as_str().unwrap_or("").trim();
-        let akey = v["access_key_id"].as_str().unwrap_or("").trim();
-        let skey = v["secret_access_key"].as_str().unwrap_or("").trim();
+        let akey = v["access_key_id"].as_str().or_else(|| v["access_key"].as_str()).unwrap_or("").trim();
+        let skey = v["secret_access_key"].as_str().or_else(|| v["secret_key"].as_str()).unwrap_or("").trim();
         let prefix = v["prefix"].as_str().unwrap_or("").trim();
 
         if bucket.is_empty() || akey.is_empty() || skey.is_empty() {

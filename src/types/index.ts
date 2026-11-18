@@ -252,6 +252,8 @@ export interface S3ConfigData {
   region: string;
   access_key: string;
   secret_key: string;
+  access_key_id?: string;
+  secret_access_key?: string;
   endpoint?: string;
   prefix?: string;
 }

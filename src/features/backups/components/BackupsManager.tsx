@@ -420,6 +420,8 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
           region: s3Region.trim() || 'us-east-1',
           access_key: s3AccessKey.trim(),
           secret_key: s3SecretKey.trim(),
+          access_key_id: s3AccessKey.trim(),
+          secret_access_key: s3SecretKey.trim(),
           endpoint: s3Endpoint.trim() || undefined,
           prefix: s3Prefix.trim() || undefined,
         });
@@ -466,6 +468,8 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
         region: s3Region.trim() || 'us-east-1',
         access_key: s3AccessKey.trim(),
         secret_key: s3SecretKey.trim(),
+        access_key_id: s3AccessKey.trim(),
+        secret_access_key: s3SecretKey.trim(),
         endpoint: s3Endpoint.trim() || undefined,
         prefix: s3Prefix.trim() || undefined,
       });
