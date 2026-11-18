@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Automated Release Publisher for Server Command Center
     Powered by Falah Tech (falah-tech.com)

@@ -463,7 +463,7 @@ export const GeneralPreferences = () => {
             <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-1">
               <span className="text-[11px] text-muted-foreground uppercase font-mono">Application</span>
               <p className="font-semibold text-xs text-foreground">Server Command Center</p>
-              <span className="text-[10px] text-muted-foreground">v1.0.0 (Falah Tech)</span>
+              <span className="text-[10px] text-muted-foreground">v{APP_VERSION} (Falah Tech)</span>
             </div>
 
             <div className="p-4 rounded-xl border border-border bg-muted/40 space-y-1">

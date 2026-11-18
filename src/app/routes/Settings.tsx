@@ -4,6 +4,7 @@ import { VaultSettings } from '@/features/vault/components/VaultSettings';
 import { RebuildProfileManager } from '@/features/rebuild/components/RebuildProfileManager';
 import { KnownHostsManager } from '@/features/settings/components/KnownHostsManager';
 import { GeneralPreferences } from '@/features/settings/components/GeneralPreferences';
+import { UpdateTracker } from '@/features/settings/components/UpdateTracker';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { 
@@ -12,6 +13,7 @@ import {
   Shield, 
   Rocket, 
   Sliders, 
+  Sparkles,
   Lock, 
   Unlock 
 } from 'lucide-react';
@@ -68,6 +70,14 @@ export const Settings = () => {
       icon: Sliders, 
       accentColor: 'text-sky-400', 
       accentBg: 'bg-sky-400' 
+    },
+    { 
+      id: 'updates', 
+      label: 'Updates & Releases', 
+      shortLabel: 'Updates',
+      icon: Sparkles, 
+      accentColor: 'text-violet-400', 
+      accentBg: 'bg-violet-400' 
     },
   ];
 
@@ -145,6 +155,11 @@ export const Settings = () => {
         {/* Tab 4: Preferences & Terminal */}
         <TabsContent value="preferences" className="flex-1 mt-6 overflow-y-auto pr-2 space-y-6">
           <GeneralPreferences />
+        </TabsContent>
+
+        {/* Tab 5: Updates & Releases Tracking */}
+        <TabsContent value="updates" className="flex-1 mt-6 overflow-y-auto pr-2 space-y-6">
+          <UpdateTracker />
         </TabsContent>
       </Tabs>
     </div>

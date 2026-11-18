@@ -110,3 +110,96 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
     throw new Error(msg, { cause: err });
   }
 }
+
+export interface ReleaseAssetInfo {
+  name: string;
+  downloadUrl: string;
+  size: number;
+  downloadCount: number;
+  type: 'installer' | 'portable' | 'apk' | 'checksums' | 'other';
+}
+
+export interface ReleaseHistoryItem {
+  id: number;
+  tagName: string;
+  cleanVersion: string;
+  name: string;
+  body: string;
+  publishedAt: string;
+  htmlUrl: string;
+  isPrerelease: boolean;
+  isCurrent: boolean;
+  isNewer: boolean;
+  assets: ReleaseAssetInfo[];
+}
+
+/**
+ * Fetch all recent releases from GitHub for detailed changelog and update tracking
+ */
+export async function fetchReleaseHistory(): Promise<ReleaseHistoryItem[]> {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases?per_page=20`, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return [];
+      }
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((item: any) => {
+      const tagName: string = item.tag_name || '';
+      const cleanVersion = tagName.replace(/^v/i, '');
+      const isCurrent = cleanVersion === APP_VERSION || tagName === `v${APP_VERSION}`;
+      const isNewer = isNewerVersion(tagName, APP_VERSION);
+
+      const assets: ReleaseAssetInfo[] = Array.isArray(item.assets)
+        ? item.assets.map((a: any) => {
+            const nameLower = (a.name || '').toLowerCase();
+            let type: ReleaseAssetInfo['type'] = 'other';
+            if (nameLower.endsWith('-setup.exe') || (nameLower.includes('setup') && nameLower.endsWith('.exe'))) {
+              type = 'installer';
+            } else if (nameLower.endsWith('.exe')) {
+              type = 'portable';
+            } else if (nameLower.endsWith('.apk')) {
+              type = 'apk';
+            } else if (nameLower.includes('checksum') || nameLower.endsWith('.sha256') || nameLower.endsWith('.txt')) {
+              type = 'checksums';
+            }
+
+            return {
+              name: a.name || 'unnamed',
+              downloadUrl: a.browser_download_url || '',
+              size: a.size || 0,
+              downloadCount: a.download_count || 0,
+              type,
+            };
+          })
+        : [];
+
+      return {
+        id: item.id,
+        tagName,
+        cleanVersion,
+        name: item.name || tagName,
+        body: item.body || 'No release notes provided.',
+        publishedAt: item.published_at || new Date().toISOString(),
+        htmlUrl: item.html_url || `https://github.com/${GITHUB_REPO}/releases/tag/${tagName}`,
+        isPrerelease: Boolean(item.prerelease),
+        isCurrent,
+        isNewer,
+        assets,
+      };
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to fetch release history.';
+    throw new Error(msg, { cause: err });
+  }
+}
