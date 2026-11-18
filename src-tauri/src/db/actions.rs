@@ -36,6 +36,11 @@ pub const CREATE_BACKUP: &str = "create_backup";
 pub const RESTORE_BACKUP: &str = "restore_backup";
 pub const DELETE_BACKUP: &str = "delete_backup";
 pub const DOWNLOAD_BACKUP: &str = "download_backup";
+pub const CREATE_BACKUP_SCHEDULE: &str = "create_backup_schedule";
+pub const UPDATE_BACKUP_SCHEDULE: &str = "update_backup_schedule";
+pub const DELETE_BACKUP_SCHEDULE: &str = "delete_backup_schedule";
+pub const RUN_BACKUP_SCHEDULE: &str = "run_backup_schedule";
+pub const UPLOAD_BACKUP_CLOUD: &str = "upload_backup_cloud";
 
 pub const START_TUNNEL: &str = "start_tunnel";
 pub const STOP_TUNNEL: &str = "stop_tunnel";

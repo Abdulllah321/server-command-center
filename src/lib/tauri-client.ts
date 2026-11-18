@@ -373,6 +373,115 @@ export const downloadBackup = async (
   });
 };
 
+export interface BackupSchedule {
+  id: string;
+  server_id: string;
+  name: string;
+  target_type: 'postgres' | 'mysql' | 'redis' | 'directory' | 'custom';
+  target_name: string;
+  cron_expression: string;
+  destination_dir: string;
+  retention_count: number;
+  cloud_provider: 'none' | 's3' | 'dropbox';
+  cloud_config_id: string | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_status: 'success' | 'failed' | 'running' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateBackupScheduleOptions {
+  server_id: string;
+  name: string;
+  target_type: 'postgres' | 'mysql' | 'redis' | 'directory' | 'custom';
+  target_name: string;
+  cron_expression: string;
+  destination_dir?: string;
+  db_user?: string;
+  db_password?: string;
+  db_host?: string;
+  db_port?: number;
+  custom_command?: string;
+  retention_count?: number;
+  cloud_provider?: 'none' | 's3' | 'dropbox';
+  cloud_config_id?: string;
+  enabled?: boolean;
+}
+
+export interface CloudStorageConfig {
+  id: string;
+  name: string;
+  provider: 's3' | 'dropbox';
+  config_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveCloudStorageConfigOptions {
+  id?: string;
+  name: string;
+  provider: 's3' | 'dropbox';
+  config_json: string;
+}
+
+export interface TestCloudStorageResult {
+  success: boolean;
+  message: string;
+}
+
+export interface CloudUploadResult {
+  success: boolean;
+  message: string;
+  remote_path: string;
+}
+
+export interface ScheduleRunResult {
+  success: boolean;
+  message: string;
+  archive_file: string;
+}
+
+export const listBackupSchedules = async (serverId: string): Promise<BackupSchedule[]> => {
+  return await invoke('list_backup_schedules', { serverId });
+};
+
+export const createBackupSchedule = async (options: CreateBackupScheduleOptions): Promise<BackupSchedule> => {
+  return await invoke('create_backup_schedule', { options });
+};
+
+export const toggleBackupSchedule = async (scheduleId: string, enabled: boolean): Promise<BackupSchedule> => {
+  return await invoke('toggle_backup_schedule', { scheduleId, enabled });
+};
+
+export const deleteBackupSchedule = async (scheduleId: string): Promise<void> => {
+  return await invoke('delete_backup_schedule', { scheduleId });
+};
+
+export const runBackupScheduleNow = async (scheduleId: string): Promise<ScheduleRunResult> => {
+  return await invoke('run_backup_schedule_now', { scheduleId });
+};
+
+export const testCloudStorageConnection = async (serverId: string, provider: 's3' | 'dropbox', configJson: string): Promise<TestCloudStorageResult> => {
+  return await invoke('test_cloud_storage_connection', { serverId, provider, configJson });
+};
+
+export const uploadBackupToCloud = async (serverId: string, backupId: string, cloudConfigId?: string, overrideConfigJson?: string, overrideProvider?: string): Promise<CloudUploadResult> => {
+  return await invoke('upload_backup_to_cloud', { serverId, backupId, cloudConfigId: cloudConfigId ?? null, overrideConfigJson: overrideConfigJson ?? null, overrideProvider: overrideProvider ?? null });
+};
+
+export const listCloudConfigs = async (): Promise<CloudStorageConfig[]> => {
+  return await invoke('list_cloud_configs');
+};
+
+export const saveCloudConfig = async (options: SaveCloudStorageConfigOptions): Promise<CloudStorageConfig> => {
+  return await invoke('save_cloud_config', { options });
+};
+
+export const deleteCloudConfig = async (id: string): Promise<void> => {
+  return await invoke('delete_cloud_config', { id });
+};
+
 // Port Tunnels & Local Forwarding
 export interface PortTunnelInfo {
   id: string;

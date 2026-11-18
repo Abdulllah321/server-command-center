@@ -202,6 +202,89 @@ export interface CreateBackupOptions {
   custom_command?: string;
 }
 
+export interface BackupSchedule {
+  id: string;
+  server_id: string;
+  name: string;
+  target_type: 'postgres' | 'mysql' | 'redis' | 'directory' | 'custom';
+  target_name: string;
+  cron_expression: string;
+  destination_dir: string;
+  retention_count: number;
+  cloud_provider: 'none' | 's3' | 'dropbox';
+  cloud_config_id: string | null;
+  enabled: boolean;
+  last_run_at: string | null;
+  last_status: 'success' | 'failed' | 'running' | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateBackupScheduleOptions {
+  server_id: string;
+  name: string;
+  target_type: 'postgres' | 'mysql' | 'redis' | 'directory' | 'custom';
+  target_name: string;
+  cron_expression: string;
+  destination_dir?: string;
+  db_user?: string;
+  db_password?: string;
+  db_host?: string;
+  db_port?: number;
+  custom_command?: string;
+  retention_count?: number;
+  cloud_provider?: 'none' | 's3' | 'dropbox';
+  cloud_config_id?: string;
+  enabled?: boolean;
+}
+
+export interface CloudStorageConfig {
+  id: string;
+  name: string;
+  provider: 's3' | 'dropbox';
+  config_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface S3ConfigData {
+  bucket: string;
+  region: string;
+  access_key: string;
+  secret_key: string;
+  endpoint?: string;
+  prefix?: string;
+}
+
+export interface DropboxConfigData {
+  access_token: string;
+  prefix?: string;
+}
+
+export interface SaveCloudStorageConfigOptions {
+  id?: string;
+  name: string;
+  provider: 's3' | 'dropbox';
+  config_json: string;
+}
+
+export interface TestCloudStorageResult {
+  success: boolean;
+  message: string;
+}
+
+export interface CloudUploadResult {
+  success: boolean;
+  message: string;
+  remote_path: string;
+}
+
+export interface ScheduleRunResult {
+  success: boolean;
+  message: string;
+  archive_file: string;
+}
+
 export interface NginxSite {
   name: string;
   domains: string[];

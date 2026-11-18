@@ -57,6 +57,7 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         ("0003_alerts", include_str!("migrations/0003_alerts.sql")),
         ("0004_default_commands", include_str!("migrations/0004_default_commands.sql")),
         ("0005_scheduled_rebuilds", include_str!("migrations/0005_scheduled_rebuilds.sql")),
+        ("0006_backup_schedules", include_str!("migrations/0006_backup_schedules.sql")),
     ];
 
     for (migration_id, migration_sql) in migrations {
