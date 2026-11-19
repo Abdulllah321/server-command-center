@@ -1054,27 +1054,31 @@ if not file_path or not os.path.exists(file_path):
 fname = os.path.basename(file_path)
 key = f"{{prefix.strip('/')}}/{{fname}}" if prefix.strip('/') else fname
 
+proto = "https"
 if not endpoint:
-    host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
+    if region in ("us-east-1", ""):
+        host = f"{{bucket}}.s3.amazonaws.com"
+    else:
+        host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
     url = f"https://{{host}}/{{key}}"
+    canonical_uri = f"/{{key}}"
 else:
     clean_ep = endpoint.replace("https://", "").replace("http://", "").rstrip("/")
-    if clean_ep.startswith(bucket):
-        host = clean_ep
-    else:
-        host = f"{{bucket}}.{{clean_ep}}"
     proto = "https" if "https" in endpoint else "http"
-    url = f"{{proto}}://{{host}}/{{key}}"
+    host = clean_ep
+    url = f"{{proto}}://{{host}}/{{bucket}}/{{key}}"
+    canonical_uri = f"/{{bucket}}/{{key}}"
 
+file_size = os.path.getsize(file_path)
+h = hashlib.sha256()
 with open(file_path, "rb") as f:
-    content = f.read()
-
-payload_hash = hashlib.sha256(content).hexdigest()
+    for chunk in iter(lambda: f.read(1048576), b""):
+        h.update(chunk)
+payload_hash = h.hexdigest()
 now = datetime.datetime.now(datetime.timezone.utc)
 amz_date = now.strftime('%Y%m%dT%H%M%SZ')
 date_stamp = now.strftime('%Y%m%d')
 
-canonical_uri = "/" + key
 canonical_headers = f"host:{{host}}\nx-amz-content-sha256:{{payload_hash}}\nx-amz-date:{{amz_date}}\n"
 signed_headers = "host;x-amz-content-sha256;x-amz-date"
 canonical_request = f"PUT\n{{canonical_uri}}\n\n{{canonical_headers}}\n{{signed_headers}}\n{{payload_hash}}"
@@ -1094,21 +1098,23 @@ signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).
 
 auth_header = f"{{algorithm}} Credential={{access_key}}/{{credential_scope}}, SignedHeaders={{signed_headers}}, Signature={{signature}}"
 
-req = urllib.request.Request(url, data=content, method="PUT")
-req.add_header("Host", host)
-req.add_header("x-amz-date", amz_date)
-req.add_header("x-amz-content-sha256", payload_hash)
-req.add_header("Authorization", auth_header)
-req.add_header("Content-Type", "application/octet-stream")
+with open(file_path, "rb") as f:
+    req = urllib.request.Request(url, data=f, method="PUT")
+    req.add_header("Host", host)
+    req.add_header("x-amz-date", amz_date)
+    req.add_header("x-amz-content-sha256", payload_hash)
+    req.add_header("Authorization", auth_header)
+    req.add_header("Content-Type", "application/octet-stream")
+    req.add_header("Content-Length", str(file_size))
 
-try:
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        if resp.status in (200, 204):
-            print(f"S3 upload succeeded: {{url}}")
-        else:
-            print(f"S3 upload HTTP status {{resp.status}}", file=sys.stderr)
-except Exception as e:
-    print(f"WARNING: S3 upload failed: {{e}}", file=sys.stderr)
+    try:
+        with urllib.request.urlopen(req, timeout=1800) as resp:
+            if resp.status in (200, 204):
+                print(f"S3 upload succeeded: {{url}}")
+            else:
+                print(f"S3 upload HTTP status {{resp.status}}", file=sys.stderr)
+    except Exception as e:
+        print(f"WARNING: S3 upload failed: {{e}}", file=sys.stderr)
 PY_EOF
 fi
 "#,
@@ -1871,8 +1877,8 @@ if command -v aws >/dev/null 2>&1; then
     AWS_ACCESS_KEY_ID="{akey}" AWS_SECRET_ACCESS_KEY="{skey}" AWS_DEFAULT_REGION="{region}" \
     aws s3 ls "s3://{bucket}" $ENDPOINT_FLAG >/dev/null 2>&1 && echo "S3_SUCCESS" || echo "S3_FAILED"
 else
-    python3 - << PY_EOF
-import sys, datetime, hashlib, hmac, urllib.request
+    python3 - << '\''PY_EOF'\''
+import sys, datetime, hashlib, hmac, urllib.request, urllib.error
 
 bucket = "{bucket}"
 region = "{region}"
@@ -1880,38 +1886,42 @@ endpoint = "{endpoint}"
 access_key = "{akey}"
 secret_key = "{skey}"
 
+proto = "https"
 if not endpoint:
-    host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
-    url = f"https://{{host}}/?location"
+    if region in ("us-east-1", ""):
+        host = f"{{bucket}}.s3.amazonaws.com"
+    else:
+        host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
+    url = f"https://{{host}}/?list-type=2&max-keys=1"
+    canonical_uri = "/"
 else:
     clean_ep = endpoint.replace("https://", "").replace("http://", "").rstrip("/")
-    if clean_ep.startswith(bucket):
-        host = clean_ep
-    else:
-        host = f"{{bucket}}.{{clean_ep}}"
     proto = "https" if "https" in endpoint else "http"
-    url = f"{{proto}}://{{host}}/?location"
+    host = clean_ep
+    url = f"{{proto}}://{{host}}/{{bucket}}?list-type=2&max-keys=1"
+    canonical_uri = f"/{{bucket}}"
+
+canonical_querystring = "list-type=2&max-keys=1"
+payload_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 now = datetime.datetime.now(datetime.timezone.utc)
 amz_date = now.strftime('%Y%m%dT%H%M%SZ')
 date_stamp = now.strftime('%Y%m%d')
 
-payload_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-canonical_uri = "/"
-canonical_querystring = "location="
 canonical_headers = f"host:{{host}}\nx-amz-content-sha256:{{payload_hash}}\nx-amz-date:{{amz_date}}\n"
 signed_headers = "host;x-amz-content-sha256;x-amz-date"
 canonical_request = f"GET\n{{canonical_uri}}\n{{canonical_querystring}}\n{{canonical_headers}}\n{{signed_headers}}\n{{payload_hash}}"
 
 algorithm = "AWS4-HMAC-SHA256"
-credential_scope = f"{{date_stamp}}/{{region}}/s3/aws4_request"
+effective_region = region if region else "us-east-1"
+credential_scope = f"{{date_stamp}}/{{effective_region}}/s3/aws4_request"
 string_to_sign = f"{{algorithm}}\n{{amz_date}}\n{{credential_scope}}\n{{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}}"
 
 def sign(k, m):
     return hmac.new(k, m.encode('utf-8'), hashlib.sha256).digest()
 
 k_date = sign(('AWS4' + secret_key).encode('utf-8'), date_stamp)
-k_region = sign(k_date, region)
+k_region = sign(k_date, effective_region)
 k_service = sign(k_region, "s3")
 k_signing = sign(k_service, "aws4_request")
 signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
@@ -1925,17 +1935,25 @@ req.add_header("x-amz-content-sha256", payload_hash)
 req.add_header("Authorization", auth_header)
 
 try:
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=15) as resp:
         if resp.status in (200, 204):
             print("S3_SUCCESS")
         else:
             print(f"S3_STATUS_{{resp.status}}")
 except urllib.error.HTTPError as e:
-    if e.code in (200, 404, 403):
-        # 404 or 403 means network and DNS reached S3 correctly
-        print(f"S3_HTTP_{{e.code}}")
+    err_body = ""
+    try:
+        err_body = e.read().decode('utf-8', errors='replace')[:200]
+    except Exception:
+        pass
+    if e.code in (200, 204):
+        print("S3_SUCCESS")
+    elif e.code == 403:
+        print(f"S3_HTTP_403: {{err_body}}")
+    elif e.code == 404:
+        print(f"S3_HTTP_404: {{err_body}}")
     else:
-        print(f"S3_ERR_{{e.code}}")
+        print(f"S3_HTTP_{{e.code}}: {{err_body}}")
 except Exception as e:
     print(f"S3_ERR_{{e}}")
 PY_EOF
@@ -1949,12 +1967,12 @@ fi
             skey = escape_bash(skey)
         );
 
-        let out = exec_ssh_command_full(&mut session, &test_cmd, Duration::from_secs(15)).await?;
+        let out = exec_ssh_command_full(&mut session, &test_cmd, Duration::from_secs(20)).await?;
         let txt = out.stdout.trim();
         if txt.contains("S3_SUCCESS") || txt.contains("S3_STATUS_200") {
             Ok(TestCloudStorageResult {
                 success: true,
-                message: format!("Successfully connected to S3 bucket '{}' ({})", bucket, region),
+                message: format!("Successfully connected to S3 bucket '{}' ({})", bucket, if endpoint.is_empty() { region } else { endpoint }),
                 details: Some(txt.to_string()),
             })
         } else if txt.contains("403") {
@@ -1972,7 +1990,7 @@ fi
         } else {
             Ok(TestCloudStorageResult {
                 success: false,
-                message: format!("Failed to connect to S3: {}", txt),
+                message: format!("Failed to connect to S3: {}", if txt.is_empty() { out.stderr.trim() } else { txt }),
                 details: Some(out.stderr.trim().to_string()),
             })
         }
@@ -1987,10 +2005,26 @@ pub async fn upload_backup_to_cloud(
     app_handle: tauri::AppHandle,
     server_id: String,
     backup_id: String,
-    provider: String,
-    config_json: String,
+    cloud_config_id: Option<String>,
+    override_config_json: Option<String>,
+    override_provider: Option<String>,
+    provider: Option<String>,
+    config_json: Option<String>,
 ) -> CommandResult<CloudUploadResult> {
     let start_time = Instant::now();
+
+    // 0. Resolve provider and config_json (support both cloud_config_id and inline overrides)
+    let (target_provider, target_config_json) = if let Some(ref cid) = cloud_config_id {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT provider, config_json FROM cloud_storage_configs WHERE id = ?1")
+            .map_err(|e| CommandError::Database(e.to_string()))?;
+        stmt.query_row([cid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|_| CommandError::NotFound(format!("Cloud configuration '{}' not found", cid)))?
+    } else if let (Some(p), Some(c)) = (override_provider.or(provider), override_config_json.or(config_json)) {
+        (p, c)
+    } else {
+        return Err(CommandError::Validation("Cloud storage configuration is required".into()));
+    };
 
     // 1. Fetch backup destination path from DB
     let dest_file = {
@@ -2008,8 +2042,8 @@ pub async fn upload_backup_to_cloud(
     let mut session = session_arc.lock().await;
 
     // 3. Perform upload
-    if provider == "dropbox" {
-        let v: serde_json::Value = serde_json::from_str(&config_json)
+    if target_provider == "dropbox" {
+        let v: serde_json::Value = serde_json::from_str(&target_config_json)
             .map_err(|e| CommandError::Validation(format!("Invalid Dropbox JSON config: {}", e)))?;
         let token = v["access_token"].as_str().unwrap_or("").trim();
         let folder = v["path"].as_str().unwrap_or("/ServerCommandCenter/Backups").trim();
@@ -2028,17 +2062,83 @@ FNAME=$(basename "$DEST")
 TARGET="${{FOLDER%/}}/${{FNAME}}"
 [[ "$TARGET" != /* ]] && TARGET="/$TARGET"
 
-RESP=$(curl -s -X POST https://content.dropboxapi.com/2/files/upload \
-  --header "Authorization: Bearer $TOKEN" \
-  --header "Dropbox-API-Arg: {{\"path\": \"$TARGET\",\"mode\": \"add\",\"autorename\": true,\"mute\": false}}" \
-  --header "Content-Type: application/octet-stream" \
-  --data-binary @"$DEST")
+FSIZE=$(stat -c%s "$DEST" 2>/dev/null || stat -f%z "$DEST" 2>/dev/null || echo 0)
 
-if echo "$RESP" | grep -q "\"id\":"; then
-    echo "SUCCESS:$TARGET"
+if [ "$FSIZE" -le 146800640 ]; then
+    RESP=$(curl -s -X POST https://content.dropboxapi.com/2/files/upload \
+      --header "Authorization: Bearer $TOKEN" \
+      --header "Dropbox-API-Arg: {{\"path\": \"$TARGET\",\"mode\": \"add\",\"autorename\": true,\"mute\": false}}" \
+      --header "Content-Type: application/octet-stream" \
+      --data-binary @"$DEST")
+
+    if echo "$RESP" | grep -q "\"id\":"; then
+        echo "SUCCESS:$TARGET"
+    else
+        echo "ERROR:$RESP" >&2
+        exit 1
+    fi
 else
-    echo "ERROR:$RESP" >&2
-    exit 1
+    DEST="$DEST" TOKEN="$TOKEN" TARGET="$TARGET" python3 - << '\''PY_EOF'\''
+import sys, os, json, urllib.request
+
+token = os.environ.get("TOKEN", "")
+file_path = os.environ.get("DEST", "")
+target_path = os.environ.get("TARGET", "")
+file_size = os.path.getsize(file_path)
+CHUNK_SIZE = 16 * 1024 * 1024
+
+try:
+    with open(file_path, "rb") as f:
+        first_chunk = f.read(CHUNK_SIZE)
+        req = urllib.request.Request(
+            "https://content.dropboxapi.com/2/files/upload_session/start",
+            data=first_chunk,
+            headers={{
+                "Authorization": f"Bearer {{token}}",
+                "Dropbox-API-Arg": json.dumps({{"close": False}}),
+                "Content-Type": "application/octet-stream",
+            }}
+        )
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            session_id = json.loads(resp.read().decode())["session_id"]
+        
+        offset = len(first_chunk)
+        while offset < file_size:
+            chunk = f.read(CHUNK_SIZE)
+            is_last = (offset + len(chunk)) >= file_size
+            if not is_last:
+                req = urllib.request.Request(
+                    "https://content.dropboxapi.com/2/files/upload_session/append_v2",
+                    data=chunk,
+                    headers={{
+                        "Authorization": f"Bearer {{token}}",
+                        "Dropbox-API-Arg": json.dumps({{"cursor": {{"session_id": session_id, "offset": offset}}, "close": False}}),
+                        "Content-Type": "application/octet-stream",
+                    }}
+                )
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    resp.read()
+            else:
+                req = urllib.request.Request(
+                    "https://content.dropboxapi.com/2/files/upload_session/finish",
+                    data=chunk,
+                    headers={{
+                        "Authorization": f"Bearer {{token}}",
+                        "Dropbox-API-Arg": json.dumps({{
+                            "cursor": {{"session_id": session_id, "offset": offset}},
+                            "commit": {{"path": target_path, "mode": "add", "autorename": True, "mute": False}}
+                        }}),
+                        "Content-Type": "application/octet-stream",
+                    }}
+                )
+                with urllib.request.urlopen(req, timeout=600) as resp:
+                    resp.read()
+            offset += len(chunk)
+    print(f"SUCCESS:{{target_path}}")
+except Exception as e:
+    print(f"ERROR:{{e}}", file=sys.stderr)
+    sys.exit(1)
+PY_EOF
 fi
 '
 "#,
@@ -2047,7 +2147,7 @@ fi
             folder = escape_bash(folder)
         );
 
-        let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(300)).await?;
+        let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(1800)).await?;
         if out.exit_status.unwrap_or(0) != 0 {
             return Err(CommandError::Internal(format!("Dropbox upload failed: {}", out.stderr.trim())));
         }
@@ -2071,8 +2171,8 @@ fi
             message: format!("Backup successfully uploaded to Dropbox at {}", remote_path),
             remote_path,
         })
-    } else if provider == "s3" {
-        let v: serde_json::Value = serde_json::from_str(&config_json)
+    } else if target_provider == "s3" {
+        let v: serde_json::Value = serde_json::from_str(&target_config_json)
             .map_err(|e| CommandError::Validation(format!("Invalid S3 JSON config: {}", e)))?;
         let bucket = v["bucket"].as_str().unwrap_or("").trim();
         let region = v["region"].as_str().unwrap_or("us-east-1").trim();
@@ -2105,74 +2205,88 @@ if command -v aws >/dev/null 2>&1; then
     aws s3 cp "$DEST" "s3://${{BUCKET}}/${{SKEY_PATH}}" $ENDPOINT_FLAG
     echo "SUCCESS:s3://${{BUCKET}}/${{SKEY_PATH}}"
 else
-    python3 - << PY_EOF
+    python3 - << '\''PY_EOF'\''
 import sys, os, datetime, hashlib, hmac, urllib.request
 
-bucket = "$BUCKET"
-region = "$REGION"
-endpoint = "$ENDPOINT"
-access_key = "$AKEY"
-secret_key = "$SKEY"
-key = "$SKEY_PATH"
-file_path = "$DEST"
+bucket = os.environ.get("BUCKET", "{bucket}")
+region = os.environ.get("REGION", "{region}")
+endpoint = os.environ.get("ENDPOINT", "{endpoint}")
+access_key = os.environ.get("AKEY", "{akey}")
+secret_key = os.environ.get("SKEY", "{skey}")
+prefix = os.environ.get("PREFIX", "{prefix}")
+file_path = os.environ.get("DEST", "{dest_file}")
 
+if not file_path or not os.path.exists(file_path):
+    print("ERROR: File not found", file=sys.stderr)
+    sys.exit(1)
+
+fname = os.path.basename(file_path)
+key = f"{{prefix.strip('/')}}/{{fname}}" if prefix.strip('/') else fname
+
+proto = "https"
 if not endpoint:
-    host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
+    if region in ("us-east-1", ""):
+        host = f"{{bucket}}.s3.amazonaws.com"
+    else:
+        host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
     url = f"https://{{host}}/{{key}}"
+    canonical_uri = f"/{{key}}"
 else:
     clean_ep = endpoint.replace("https://", "").replace("http://", "").rstrip("/")
-    if clean_ep.startswith(bucket):
-        host = clean_ep
-    else:
-        host = f"{{bucket}}.{{clean_ep}}"
     proto = "https" if "https" in endpoint else "http"
-    url = f"{{proto}}://{{host}}/{{key}}"
+    host = clean_ep
+    url = f"{{proto}}://{{host}}/{{bucket}}/{{key}}"
+    canonical_uri = f"/{{bucket}}/{{key}}"
 
+file_size = os.path.getsize(file_path)
+h = hashlib.sha256()
 with open(file_path, "rb") as f:
-    content = f.read()
-
-payload_hash = hashlib.sha256(content).hexdigest()
+    for chunk in iter(lambda: f.read(1048576), b""):
+        h.update(chunk)
+payload_hash = h.hexdigest()
 now = datetime.datetime.now(datetime.timezone.utc)
 amz_date = now.strftime('%Y%m%dT%H%M%SZ')
 date_stamp = now.strftime('%Y%m%d')
 
-canonical_uri = "/" + key
 canonical_headers = f"host:{{host}}\nx-amz-content-sha256:{{payload_hash}}\nx-amz-date:{{amz_date}}\n"
 signed_headers = "host;x-amz-content-sha256;x-amz-date"
 canonical_request = f"PUT\n{{canonical_uri}}\n\n{{canonical_headers}}\n{{signed_headers}}\n{{payload_hash}}"
 
 algorithm = "AWS4-HMAC-SHA256"
-credential_scope = f"{{date_stamp}}/{{region}}/s3/aws4_request"
+effective_region = region if region else "us-east-1"
+credential_scope = f"{{date_stamp}}/{{effective_region}}/s3/aws4_request"
 string_to_sign = f"{{algorithm}}\n{{amz_date}}\n{{credential_scope}}\n{{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}}"
 
 def sign(k, m):
     return hmac.new(k, m.encode('utf-8'), hashlib.sha256).digest()
 
 k_date = sign(('AWS4' + secret_key).encode('utf-8'), date_stamp)
-k_region = sign(k_date, region)
+k_region = sign(k_date, effective_region)
 k_service = sign(k_region, "s3")
 k_signing = sign(k_service, "aws4_request")
 signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
 
 auth_header = f"{{algorithm}} Credential={{access_key}}/{{credential_scope}}, SignedHeaders={{signed_headers}}, Signature={{signature}}"
 
-req = urllib.request.Request(url, data=content, method="PUT")
-req.add_header("Host", host)
-req.add_header("x-amz-date", amz_date)
-req.add_header("x-amz-content-sha256", payload_hash)
-req.add_header("Authorization", auth_header)
-req.add_header("Content-Type", "application/octet-stream")
+with open(file_path, "rb") as f:
+    req = urllib.request.Request(url, data=f, method="PUT")
+    req.add_header("Host", host)
+    req.add_header("x-amz-date", amz_date)
+    req.add_header("x-amz-content-sha256", payload_hash)
+    req.add_header("Authorization", auth_header)
+    req.add_header("Content-Type", "application/octet-stream")
+    req.add_header("Content-Length", str(file_size))
 
-try:
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        if resp.status in (200, 204):
-            print(f"SUCCESS:s3://{{bucket}}/{{key}}")
-        else:
-            print(f"ERROR:HTTP {{resp.status}}", file=sys.stderr)
-            sys.exit(1)
-except Exception as e:
-    print(f"ERROR:{{e}}", file=sys.stderr)
-    sys.exit(1)
+    try:
+        with urllib.request.urlopen(req, timeout=1800) as resp:
+            if resp.status in (200, 204):
+                print(f"SUCCESS:s3://{{bucket}}/{{key}}")
+            else:
+                print(f"ERROR:HTTP {{resp.status}}", file=sys.stderr)
+                sys.exit(1)
+    except Exception as e:
+        print(f"ERROR:{{e}}", file=sys.stderr)
+        sys.exit(1)
 PY_EOF
 fi
 '
@@ -2186,7 +2300,7 @@ fi
             prefix = escape_bash(prefix)
         );
 
-        let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(300)).await?;
+        let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(1800)).await?;
         if out.exit_status.unwrap_or(0) != 0 {
             return Err(CommandError::Internal(format!("S3 upload failed: {}", out.stderr.trim())));
         }
@@ -2211,7 +2325,7 @@ fi
             remote_path,
         })
     } else {
-        Err(CommandError::Validation(format!("Unsupported storage provider '{}'", provider)))
+        Err(CommandError::Validation(format!("Unsupported storage provider '{}'", target_provider)))
     }
 }
 

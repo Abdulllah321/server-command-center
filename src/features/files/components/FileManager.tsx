@@ -46,6 +46,8 @@ import {
   listRemoteFiles, 
   downloadRemoteFile, 
   uploadRemoteFile, 
+  uploadRemoteFileChunk,
+  cancelRemoteFileUpload,
   createRemoteDirectory, 
   createRemoteFile, 
   renameRemotePath, 
@@ -97,6 +99,18 @@ export const FileManager: React.FC<FileManagerProps> = ({ serverId }) => {
   // Uploading state
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    uploadId: string;
+    filename: string;
+    totalSize: number;
+    uploadedBytes: number;
+    currentChunk: number;
+    totalChunks: number;
+    percent: number;
+    speedMBps: number;
+    timeRemainingSec?: number;
+  } | null>(null);
+  const cancelUploadRef = useRef<(() => void) | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch directory listing
@@ -137,34 +151,114 @@ export const FileManager: React.FC<FileManagerProps> = ({ serverId }) => {
     }
   };
 
-  // Upload handler (Base64 zero server memory)
+  // Upload handler supporting large files (1 GB+) via chunked binary stream
   const handleFileUpload = async (file: File) => {
+    if (!file) return;
+
+    // Helper to read a single slice as base64 without loading whole file
+    const readSliceAsBase64 = (slice: Blob): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result as string;
+          const commaIdx = res.indexOf(',');
+          resolve(commaIdx !== -1 ? res.substring(commaIdx + 1) : res);
+        };
+        reader.onerror = () => reject(reader.error || new Error('Slice read error'));
+        reader.readAsDataURL(slice);
+      });
+    };
+
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB chunk size
+    const totalSize = file.size;
+    const totalChunks = Math.max(1, Math.ceil(totalSize / CHUNK_SIZE));
+    const uploadId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    let isCancelled = false;
+    cancelUploadRef.current = () => {
+      isCancelled = true;
+    };
+
+    setIsUploading(true);
+    const startTime = Date.now();
+
+    setUploadProgress({
+      uploadId,
+      filename: file.name,
+      totalSize,
+      uploadedBytes: 0,
+      currentChunk: 0,
+      totalChunks,
+      percent: 0,
+      speedMBps: 0,
+    });
+
     try {
-      setIsUploading(true);
-      toast.info(`Uploading ${file.name}...`);
-      
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const rawResult = reader.result as string;
-          const base64Content = rawResult.split(',')[1] || rawResult;
-          await uploadRemoteFile(serverId, currentPath, file.name, base64Content);
-          toast.success(`Uploaded ${file.name} successfully`);
-          fetchDirectory();
-        } catch (uploadErr: any) {
-          toast.error(`Upload error: ${uploadErr?.message || uploadErr}`);
-        } finally {
+      toast.info(`Starting upload of ${file.name} (${formatSize(totalSize)})...`);
+
+      for (let i = 0; i < totalChunks; i++) {
+        if (isCancelled) {
+          await cancelRemoteFileUpload(serverId, currentPath, file.name, uploadId).catch(() => {});
+          toast.warning(`Upload of ${file.name} was cancelled`);
+          setUploadProgress(null);
           setIsUploading(false);
+          cancelUploadRef.current = null;
+          return;
         }
-      };
-      reader.onerror = () => {
-        toast.error('Failed to read local file');
-        setIsUploading(false);
-      };
-      reader.readAsDataURL(file);
+
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const slice = file.slice(start, end);
+        const base64Chunk = await readSliceAsBase64(slice);
+
+        await uploadRemoteFileChunk({
+          serverId,
+          remoteDir: currentPath,
+          filename: file.name,
+          uploadId,
+          chunkIndex: i,
+          totalChunks,
+          totalSize,
+          base64Chunk,
+        });
+
+        const currentUploaded = end;
+        const now = Date.now();
+        const elapsedSec = (now - startTime) / 1000;
+        let speedMBps = 0;
+        if (elapsedSec > 0) {
+          speedMBps = parseFloat(((currentUploaded / (1024 * 1024)) / elapsedSec).toFixed(2));
+        }
+        const percent = Math.min(100, Math.round((currentUploaded / Math.max(1, totalSize)) * 100));
+        const remainingBytes = totalSize - currentUploaded;
+        const timeRemainingSec = speedMBps > 0 ? Math.round((remainingBytes / (1024 * 1024)) / speedMBps) : undefined;
+
+        setUploadProgress({
+          uploadId,
+          filename: file.name,
+          totalSize,
+          uploadedBytes: currentUploaded,
+          currentChunk: i + 1,
+          totalChunks,
+          percent,
+          speedMBps,
+          timeRemainingSec,
+        });
+      }
+
+      toast.success(`Uploaded ${file.name} (${formatSize(totalSize)}) successfully`);
+      fetchDirectory();
     } catch (err: any) {
-      toast.error(`Upload failed: ${err?.message || err}`);
+      if (!isCancelled) {
+        await cancelRemoteFileUpload(serverId, currentPath, file.name, uploadId).catch(() => {});
+        toast.error(`Upload failed: ${err?.message || err}`);
+      }
+    } finally {
+      setUploadProgress(null);
       setIsUploading(false);
+      cancelUploadRef.current = null;
     }
   };
 
@@ -498,6 +592,61 @@ export const FileManager: React.FC<FileManagerProps> = ({ serverId }) => {
           )}
         </div>
       </div>
+
+      {/* Active Chunked Upload Progress Banner */}
+      {uploadProgress && (
+        <div className="mx-3.5 mt-3 p-3.5 rounded-xl border border-primary/30 bg-primary/5 backdrop-blur-md shadow-md animate-in fade-in slide-in-from-top-2 duration-200 shrink-0">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
+                <UploadCloud className="w-4 h-4 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground truncate">{uploadProgress.filename}</span>
+                  <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 border-primary/30 text-primary">
+                    {uploadProgress.percent}%
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span>{formatSize(uploadProgress.uploadedBytes)} of {formatSize(uploadProgress.totalSize)}</span>
+                  <span>•</span>
+                  <span className="font-mono text-foreground font-medium">{uploadProgress.speedMBps} MB/s</span>
+                  {uploadProgress.timeRemainingSec !== undefined && (
+                    <>
+                      <span>•</span>
+                      <span>~{uploadProgress.timeRemainingSec}s remaining</span>
+                    </>
+                  )}
+                  <span>•</span>
+                  <span>Chunk {uploadProgress.currentChunk}/{uploadProgress.totalChunks}</span>
+                </p>
+              </div>
+            </div>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (cancelUploadRef.current) {
+                  cancelUploadRef.current();
+                }
+              }}
+              className="h-7 px-2.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive shrink-0 gap-1"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" /> Cancel
+            </Button>
+          </div>
+
+          {/* Animated visual progress bar */}
+          <div className="w-full bg-muted/60 h-2 rounded-full overflow-hidden border border-border/40">
+            <div 
+              className="bg-primary h-full rounded-full transition-all duration-150 ease-out shadow-xs"
+              style={{ width: `${uploadProgress.percent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* File Explorer Table */}
       <div className="flex-1 min-h-0 overflow-y-auto relative">

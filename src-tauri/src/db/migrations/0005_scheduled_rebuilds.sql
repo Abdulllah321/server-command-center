@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS scheduled_rebuilds (
     status TEXT NOT NULL DEFAULT 'pending',
     last_run_at TEXT,
     last_log TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL    
 );
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_rebuilds_server ON scheduled_rebuilds(server_id);

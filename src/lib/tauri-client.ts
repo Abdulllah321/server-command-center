@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -792,6 +792,14 @@ export const downloadRemoteFile = async (serverId: string, path: string): Promis
 
 export const uploadRemoteFile = async (serverId: string, remoteDir: string, filename: string, base64Content: string): Promise<void> => {
   return await invoke('upload_remote_file', { serverId, remoteDir, filename, base64Content });
+};
+
+export const uploadRemoteFileChunk = async (payload: UploadFileChunkPayload): Promise<void> => {
+  return await invoke('upload_remote_file_chunk', { payload });
+};
+
+export const cancelRemoteFileUpload = async (serverId: string, remoteDir: string, filename: string, uploadId: string): Promise<void> => {
+  return await invoke('cancel_remote_file_upload', { serverId, remoteDir, filename, uploadId });
 };
 
 export const createRemoteDirectory = async (serverId: string, path: string): Promise<void> => {

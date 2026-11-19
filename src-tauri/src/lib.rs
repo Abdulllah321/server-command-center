@@ -189,6 +189,8 @@ pub fn run() {
         commands::files::write_remote_file_content,
         commands::files::download_remote_file,
         commands::files::upload_remote_file,
+        commands::files::upload_remote_file_chunk,
+        commands::files::cancel_remote_file_upload,
         commands::files::create_remote_directory,
         commands::files::create_remote_file,
         commands::files::rename_remote_path,

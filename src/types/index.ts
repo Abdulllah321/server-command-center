@@ -380,4 +380,16 @@ export interface DownloadedFilePayload {
   is_archive: boolean;
 }
 
+export interface UploadFileChunkPayload {
+  serverId: string;
+  remoteDir: string;
+  filename: string;
+  uploadId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  totalSize: number;
+  base64Chunk: string;
+}
+
+
 

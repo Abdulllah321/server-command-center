@@ -54,6 +54,18 @@ pub struct DownloadedFilePayload {
     pub is_archive: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UploadFileChunkPayload {
+    pub server_id: String,
+    pub remote_dir: String,
+    pub filename: String,
+    pub upload_id: String,
+    pub chunk_index: usize,
+    pub total_chunks: usize,
+    pub total_size: u64,
+    pub base64_chunk: String,
+}
+
 /// Helper to execute a command over SSH with a strict timeout and zero server memory footprint
 async fn exec_ssh_command(
     session: &mut Handle<SshClientHandler>,
@@ -95,6 +107,67 @@ async fn exec_ssh_command(
     
     let _ = channel.close().await;
     Ok(output)
+}
+
+/// Helper to execute a command over SSH and stream binary data into its STDIN
+async fn write_stdin_ssh_command(
+    session: &mut Handle<SshClientHandler>,
+    cmd: &str,
+    data: &[u8],
+) -> Result<(), CommandError> {
+    let mut channel = session.channel_open_session().await
+        .map_err(|e| CommandError::Internal(format!("Failed to open SSH channel: {}", e)))?;
+
+    channel.exec(true, cmd).await
+        .map_err(|e| CommandError::Internal(format!("Failed to exec command '{}': {}", cmd, e)))?;
+
+    if !data.is_empty() {
+        channel.data(data).await
+            .map_err(|e| CommandError::Internal(format!("Failed to send data to SSH channel: {}", e)))?;
+    }
+
+    channel.eof().await
+        .map_err(|e| CommandError::Internal(format!("Failed to send EOF to SSH channel: {}", e)))?;
+
+    let timeout_duration = Duration::from_secs(60);
+    let mut stderr_output = String::new();
+    let mut exit_code: Option<u32> = None;
+
+    loop {
+        let msg_future = channel.wait();
+        let msg_opt = match timeout(timeout_duration, msg_future).await {
+            Ok(opt) => opt,
+            Err(_) => {
+                let _ = channel.close().await;
+                return Err(CommandError::Internal("SSH stream timed out".into()));
+            }
+        };
+
+        match msg_opt {
+            Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                stderr_output.push_str(&String::from_utf8_lossy(data));
+            }
+            Some(ChannelMsg::ExitStatus { exit_status }) => {
+                exit_code = Some(exit_status);
+            }
+            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+            _ => {}
+        }
+    }
+
+    let _ = channel.close().await;
+
+    if let Some(code) = exit_code {
+        if code != 0 {
+            return Err(CommandError::Internal(format!(
+                "Command failed with exit code {}: {}",
+                code,
+                stderr_output.trim()
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 /// Lists files and directories at `path` on the remote server
@@ -511,7 +584,7 @@ fi
     })
 }
 
-/// Uploads a file to a remote directory via base64 stream (zero daemon, atomic write)
+/// Uploads a file to a remote directory via binary stream (zero daemon, atomic write)
 #[tauri::command]
 pub async fn upload_remote_file(
     state: tauri::State<'_, AppState>,
@@ -531,31 +604,37 @@ pub async fn upload_remote_file(
         return Err(CommandError::Validation("Invalid filename".into()));
     }
 
+    let file_bytes = B64.decode(&base64_content)
+        .map_err(|e| CommandError::Validation(format!("Invalid base64 content: {}", e)))?;
+
     let start = Instant::now();
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let target_path = format!("{}/{}", remote_dir.trim_end_matches('/'), safe_filename);
-    let tmp_file = format!("{}.tmp.{}", target_path, uuid::Uuid::new_v4().simple());
+    let target_dir = remote_dir.trim_end_matches('/');
+    let target_path = format!("{}/{}", target_dir, safe_filename);
+    let tmp_file = format!("{}/.{}.tmp.{}", target_dir, safe_filename, uuid::Uuid::new_v4().simple());
 
-    let script = format!(
-        r#"
-DIR="{}"
-TARGET="{}"
-TMP="{}"
+    let init_cmd = format!("mkdir -p \"{}\" 2>/dev/null || true", target_dir.replace('"', "\\\""));
+    let _ = exec_ssh_command(&mut session, &init_cmd).await?;
 
-mkdir -p "$DIR" 2>/dev/null || true
-printf '%s' "{}" | base64 -d > "$TMP" && mv "$TMP" "$TARGET"
-"#,
-        remote_dir.replace('"', "\\\""),
-        target_path.replace('"', "\\\""),
-        tmp_file.replace('"', "\\\""),
-        base64_content
-    );
+    let write_cmd = format!("cat > \"{}\"", tmp_file.replace('"', "\\\""));
+    let write_res = write_stdin_ssh_command(&mut session, &write_cmd, &file_bytes).await;
 
-    let output = exec_ssh_command(&mut session, &script).await;
+    let output = if write_res.is_ok() {
+        let finalize_cmd = format!(
+            "mv -f \"{}\" \"{}\" && chmod 644 \"{}\"",
+            tmp_file.replace('"', "\\\""),
+            target_path.replace('"', "\\\""),
+            target_path.replace('"', "\\\"")
+        );
+        exec_ssh_command(&mut session, &finalize_cmd).await
+    } else {
+        let _ = exec_ssh_command(&mut session, &format!("rm -f \"{}\"", tmp_file.replace('"', "\\\""))).await;
+        Err(write_res.err().unwrap())
+    };
 
     if let Ok(conn) = state.db.lock() {
         log_activity(&conn, ActivityEntry {
@@ -569,6 +648,110 @@ printf '%s' "{}" | base64 -d > "$TMP" && mv "$TMP" "$TARGET"
     }
 
     output.map(|_| ())
+}
+
+/// Uploads a single chunk of a large file (supporting 1 GB+ files with zero server memory footprint)
+#[tauri::command]
+pub async fn upload_remote_file_chunk(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    payload: UploadFileChunkPayload,
+) -> CommandResult<()> {
+    if payload.server_id.is_empty() || payload.remote_dir.is_empty() || payload.filename.is_empty() {
+        return Err(CommandError::Validation("Server ID, remote dir, and filename required".into()));
+    }
+    if payload.upload_id.is_empty() {
+        return Err(CommandError::Validation("Upload ID required".into()));
+    }
+
+    let safe_filename = payload.filename.replace('/', "").replace('\\', "").replace("..", "");
+    if safe_filename.is_empty() {
+        return Err(CommandError::Validation("Invalid filename".into()));
+    }
+
+    let safe_upload_id: String = payload.upload_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+
+    let chunk_bytes = B64.decode(&payload.base64_chunk)
+        .map_err(|e| CommandError::Validation(format!("Invalid base64 chunk: {}", e)))?;
+
+    let session_arc = state.session_manager
+        .get_or_connect(payload.server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let target_dir = payload.remote_dir.trim_end_matches('/');
+    let target_path = format!("{}/{}", target_dir, safe_filename);
+    let tmp_file = format!("{}/.{}.tmp.{}", target_dir, safe_filename, safe_upload_id);
+
+    // If chunk 0: initialize directory and clear any pre-existing tmp file
+    if payload.chunk_index == 0 {
+        let init_cmd = format!(
+            "mkdir -p \"{}\" 2>/dev/null || true; rm -f \"{}\"",
+            target_dir.replace('"', "\\\""),
+            tmp_file.replace('"', "\\\"")
+        );
+        let _ = exec_ssh_command(&mut session, &init_cmd).await?;
+    }
+
+    // Append chunk via SSH channel STDIN
+    let append_cmd = format!("cat >> \"{}\"", tmp_file.replace('"', "\\\""));
+    write_stdin_ssh_command(&mut session, &append_cmd, &chunk_bytes).await?;
+
+    // If final chunk: atomically move tmp file to target and set permissions
+    if payload.chunk_index + 1 >= payload.total_chunks {
+        let finalize_cmd = format!(
+            "mv -f \"{}\" \"{}\" && chmod 644 \"{}\"",
+            tmp_file.replace('"', "\\\""),
+            target_path.replace('"', "\\\""),
+            target_path.replace('"', "\\\"")
+        );
+        let output = exec_ssh_command(&mut session, &finalize_cmd).await;
+
+        if let Ok(conn) = state.db.lock() {
+            log_activity(&conn, ActivityEntry {
+                server_id: Some(payload.server_id),
+                action: actions::UPLOAD_REMOTE_FILE.into(),
+                target: Some(target_path),
+                status: if output.is_ok() { "success".into() } else { "failed".into() },
+                detail: Some(format!("Completed chunked upload of {} bytes across {} chunks", payload.total_size, payload.total_chunks)),
+                duration_ms: None,
+            });
+        }
+
+        output.map(|_| ())
+    } else {
+        Ok(())
+    }
+}
+
+/// Cancels an in-progress chunked upload and removes its temporary file
+#[tauri::command]
+pub async fn cancel_remote_file_upload(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    remote_dir: String,
+    filename: String,
+    upload_id: String,
+) -> CommandResult<()> {
+    if server_id.is_empty() || remote_dir.is_empty() || filename.is_empty() || upload_id.is_empty() {
+        return Ok(());
+    }
+
+    let safe_filename = filename.replace('/', "").replace('\\', "").replace("..", "");
+    let safe_upload_id: String = upload_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    let target_dir = remote_dir.trim_end_matches('/');
+    let tmp_file = format!("{}/.{}.tmp.{}", target_dir, safe_filename, safe_upload_id);
+
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let cleanup_cmd = format!("rm -f \"{}\"", tmp_file.replace('"', "\\\""));
+    let _ = exec_ssh_command(&mut session, &cleanup_cmd).await;
+
+    Ok(())
 }
 
 /// Creates a new directory on the remote server
