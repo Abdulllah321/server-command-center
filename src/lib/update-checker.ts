@@ -3,8 +3,104 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.1';
+export const APP_VERSION = '1.1.3';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
+
+export interface DocumentedRelease {
+  summary: string;
+  highlights: string[];
+  features?: string[];
+  fixes?: string[];
+  performance?: string[];
+}
+
+export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.3': {
+    summary: '1-Click In-App Seamless Updater, Documented Release Changelogs, and Developer Diagnostics cleanup.',
+    highlights: [
+      '1-Click automated in-app updater: updates Server Command Center directly in-place without manual uninstall/reinstall.',
+      'Comprehensive documented release changelogs integrated directly into the Update Center.',
+      'Cleaned up developer build pipeline cards from user view for a refined production experience.',
+      'Verified universal S3-compatible path-style storage (Cloudflare R2, MinIO) and 1 GB+ SSH streaming upload engine.'
+    ],
+    features: [
+      'Seamless In-Place Upgrade Engine: Downloads setup installer to temp directory with real-time progress and launches installer in background before restarting.',
+      'Documented Changelogs UI: Visual cards categorizing Highlights, New Features, Bug Fixes, and Performance metrics for every version.',
+      'Refined Settings Experience: Streamlined user interface focusing on update management and version switching.'
+    ],
+    fixes: [
+      'Removed developer pipeline cards from user view in the Update Center as requested.',
+      'Preserves all user configuration, encrypted credentials, and server profiles across updates without uninstall.'
+    ],
+    performance: [
+      'Fast background download with progress streaming and lightweight asset caching.'
+    ]
+  },
+  'v1.1.2': {
+    summary: 'High-speed chunked 1 GB+ file upload over SSH, universal S3 path-style support for Cloudflare R2 / MinIO, and 1-Click in-app updater.',
+    highlights: [
+      'Chunked streaming file upload in File Manager (1 MB slices, zero memory overflow, 1 GB+ supported).',
+      'Universal S3-compatible path-style storage & ListObjectsV2 probing for Cloudflare R2, MinIO, Wasabi.',
+      '1-Click automated in-app update installer: upgrade instantly without uninstalling or manual downloads.',
+      'Cloud backup upload parameter resolution fix for saved target profiles.'
+    ],
+    features: [
+      'File Manager Chunked Streaming: 1 MB binary chunks streamed into SSH channel STDIN with atomic rename.',
+      'Real-time Transfer Progress: Live percentage, upload speed in MB/s, ETA, and cancellation button.',
+      '1-Click Automated In-App Updater: Downloads and applies upgrades in-place, restarting into the new version.',
+      'Universal S3 Path-Style: Seamless support for custom endpoints (Cloudflare R2, MinIO, Wasabi, Ceph).'
+    ],
+    fixes: [
+      'Resolved invalid args `provider` error when uploading existing backups to cloud storage.',
+      'Fixed S3 DNS getaddrinfo error by avoiding virtual-host prefixing on custom endpoints.',
+      'Replaced GetBucketLocation with universally supported ListObjectsV2 probe.',
+      'Fixed Dropbox large file upload by implementing upload session chunking for files > 140 MB.',
+      'Eliminated ARG_MAX command line overflows by streaming binary data directly over SSH STDIN.'
+    ],
+    performance: [
+      'Zero server RAM ballooning during multi-gigabyte uploads (streams directly from STDIN to disk).',
+      'Extended cloud storage socket timeouts to 1800s to support large multi-gigabyte archive backups.'
+    ]
+  },
+  'v1.1.1': {
+    summary: 'Hotfix release for S3 backup credential validation and update tracking center.',
+    highlights: [
+      'Fixed S3 credential field mapping (`access_key` vs `access_key_id`).',
+      'Integrated dedicated Software Updates & Release Tracker in Settings.'
+    ],
+    features: [
+      'Added Update Tracker with GitHub Releases synchronization and asset inspection.',
+      'Added automated release publication pipeline with cross-platform artifact builds.'
+    ],
+    fixes: [
+      'Fixed S3 credential validation error where Access Key ID and Secret Access Key were flagged missing.'
+    ]
+  },
+  'v1.1.0': {
+    summary: 'Major release introducing Remote File Manager, Nginx Site Configurator, Cloud Backups, and Security Center.',
+    highlights: [
+      'Full-featured Remote File Manager with Zero-RAM remote browser and Monaco code editor.',
+      'Nginx Site Manager with syntax validation, SSL certbot renewal, and live reload.',
+      'Automated backup scheduler with Cron synchronization and offsite S3 / Dropbox uploading.',
+      'UFW Firewall & Port Tunnel management.'
+    ],
+    features: [
+      'Remote File Explorer with file edit, permissions (chmod), rename, deletion, and download.',
+      'Nginx reverse proxy site manager and SSL certificate renewal.',
+      'Automated backup cron synchronization and cloud storage target profiles.',
+      'SSH port forwarding and tunneling manager.'
+    ]
+  },
+  'v1.0.0': {
+    summary: 'Initial production release of Server Command Center.',
+    highlights: [
+      'Multi-server inventory management with hardware health analytics (CPU, RAM, Disk).',
+      'Direct PM2 process management with live log streaming.',
+      'Encrypted local vault with optional Windows Hello biometric authentication.',
+      'Zero-downtime rebuild engine for fullstack applications.'
+    ]
+  }
+};
 
 export interface ReleaseAsset {
   name: string;

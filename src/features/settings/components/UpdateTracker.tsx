@@ -24,11 +24,14 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from 'cn';
+import { listen } from '@tauri-apps/api/event';
+import { downloadAndInstallUpdate, type DownloadUpdateProgressPayload } from '@/lib/tauri-client';
 import { 
   checkForUpdates, 
   fetchReleaseHistory, 
   APP_VERSION, 
   GITHUB_REPO, 
+  DOCUMENTED_CHANGELOGS,
   type UpdateCheckResult, 
   type ReleaseHistoryItem,
   type ReleaseAssetInfo
@@ -42,6 +45,75 @@ export const UpdateTracker = () => {
   const [autoCheck, setAutoCheck] = useState<boolean>(true);
   const [notifyOnUpdate, setNotifyOnUpdate] = useState<boolean>(true);
   const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({});
+  const [installingUpdate, setInstallingUpdate] = useState<{
+    isInstalling: boolean;
+    tagName: string;
+    percent: number;
+    downloadedBytes: number;
+    totalBytes: number;
+    status: 'downloading' | 'launching' | 'error';
+    errorMessage?: string;
+  } | null>(null);
+
+  const handleInstallUpdate = async (release: ReleaseHistoryItem) => {
+    const installerAsset = release.assets.find(a => a.type === 'installer')
+      || release.assets.find(a => a.name.toLowerCase().endsWith('-setup.exe'))
+      || release.assets.find(a => a.name.toLowerCase().endsWith('.exe'));
+
+    if (!installerAsset) {
+      toast.error('No Windows installer found for this release. Opening GitHub release page...', {
+        action: {
+          label: 'Open',
+          onClick: () => window.open(release.htmlUrl, '_blank'),
+        },
+      });
+      return;
+    }
+
+    setInstallingUpdate({
+      isInstalling: true,
+      tagName: release.tagName,
+      percent: 0,
+      downloadedBytes: 0,
+      totalBytes: installerAsset.size,
+      status: 'downloading',
+    });
+
+    let unlisten: (() => void) | null = null;
+    try {
+      unlisten = await listen<DownloadUpdateProgressPayload>('update-download-progress', (event) => {
+        setInstallingUpdate(prev => prev ? {
+          ...prev,
+          percent: event.payload.percent,
+          downloadedBytes: event.payload.downloaded_bytes,
+          totalBytes: event.payload.total_bytes,
+        } : null);
+      });
+
+      toast.info(`Downloading ${installerAsset.name}...`);
+
+      await downloadAndInstallUpdate({
+        downloadUrl: installerAsset.downloadUrl,
+        filename: installerAsset.name,
+        totalBytes: installerAsset.size,
+      });
+
+      setInstallingUpdate(prev => prev ? { ...prev, status: 'launching', percent: 100 } : null);
+      toast.success('Download complete! Launching updated version in-place...');
+    } catch (err: any) {
+      console.error('Update install error:', err);
+      toast.error('Update installation failed', {
+        description: err?.message || String(err),
+      });
+      setInstallingUpdate(prev => prev ? {
+        ...prev,
+        status: 'error',
+        errorMessage: err?.message || String(err),
+      } : null);
+    } finally {
+      if (unlisten) unlisten();
+    }
+  };
 
   useEffect(() => {
     const savedAutoCheck = localStorage.getItem('auto_check_updates') !== 'false';
@@ -257,25 +329,63 @@ export const UpdateTracker = () => {
 
                 <div className="flex flex-wrap items-center gap-2.5 pt-1">
                   {updateResult.exeInstallerUrl && (
+                    <Button
+                      onClick={() => {
+                        const targetRel = releases.find(r => r.cleanVersion === updateResult.latestVersion || r.tagName === `v${updateResult.latestVersion}`);
+                        if (targetRel) {
+                          handleInstallUpdate(targetRel);
+                        } else {
+                          const fakeRel: ReleaseHistoryItem = {
+                            id: 0,
+                            tagName: `v${updateResult.latestVersion}`,
+                            cleanVersion: updateResult.latestVersion,
+                            name: updateResult.releaseName,
+                            body: updateResult.releaseNotes,
+                            publishedAt: updateResult.publishedAt,
+                            htmlUrl: updateResult.htmlUrl,
+                            isPrerelease: false,
+                            isCurrent: false,
+                            isNewer: true,
+                            assets: [{
+                              name: `Server.Command.Center_${updateResult.latestVersion}_x64-setup.exe`,
+                              downloadUrl: updateResult.exeInstallerUrl,
+                              size: 0,
+                              downloadCount: 0,
+                              type: 'installer',
+                            }],
+                          };
+                          handleInstallUpdate(fakeRel);
+                        }
+                      }}
+                      disabled={installingUpdate?.isInstalling}
+                      className="h-9 px-4 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black gap-2 shadow-md cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      1-Click Upgrade to v{updateResult.latestVersion} (In-Place)
+                    </Button>
+                  )}
+
+                  {updateResult.exeInstallerUrl && (
                     <a
                       href={updateResult.exeInstallerUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all"
                     >
-                      <DownloadCloud className="w-4 h-4" />
-                      Download Windows Setup (.exe)
+                      <DownloadCloud className="w-3.5 h-3.5" />
+                      Download Setup Manually
                     </a>
                   )}
+
                   {updateResult.exePortableUrl && (
                     <a
                       href={updateResult.exePortableUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all"
                     >
-                      <DownloadCloud className="w-4 h-4" />
-                      Download Portable Binary (.exe)
+                      <DownloadCloud className="w-3.5 h-3.5" />
+                      Portable EXE
                     </a>
                   )}
                   {updateResult.apkUrl && (
@@ -283,9 +393,9 @@ export const UpdateTracker = () => {
                       href={updateResult.apkUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all"
                     >
-                      <Smartphone className="w-4 h-4" />
+                      <Smartphone className="w-3.5 h-3.5" />
                       Download Android APK
                     </a>
                   )}
@@ -430,14 +540,26 @@ export const UpdateTracker = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-center">
+                      <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                        {rel.isNewer && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleInstallUpdate(rel)}
+                            disabled={installingUpdate?.isInstalling}
+                            className="h-8 text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-black gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            1-Click Update
+                          </Button>
+                        )}
+
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => toggleExpand(rel.tagName)}
                           className="h-8 text-xs text-muted-foreground hover:text-foreground gap-1"
                         >
-                          <span>{isExpanded ? 'Hide Notes' : 'Changelog'}</span>
+                          <span>{isExpanded ? 'Hide Changelog' : 'Changelog'}</span>
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </Button>
 
@@ -453,19 +575,110 @@ export const UpdateTracker = () => {
                       </div>
                     </div>
 
-                    {/* Expandable Release Notes & Assets */}
+                    {/* Expandable Documented Changelog & Assets */}
                     {isExpanded && (
-                      <div className="p-4 pt-0 border-t border-border/40 space-y-3.5 animate-in fade-in duration-150">
-                        {/* Release Notes */}
-                        {rel.body && (
-                          <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60 text-xs text-muted-foreground font-mono whitespace-pre-line leading-relaxed max-h-56 overflow-y-auto">
-                            {rel.body}
-                          </div>
-                        )}
+                      <div className="p-4 pt-0 border-t border-border/40 space-y-4 animate-in fade-in duration-150">
+                        {/* Documented Rich Changelog */}
+                        {(() => {
+                          const doc = DOCUMENTED_CHANGELOGS[rel.tagName]
+                            || DOCUMENTED_CHANGELOGS[rel.cleanVersion]
+                            || DOCUMENTED_CHANGELOGS[`v${rel.cleanVersion}`];
+
+                          if (doc) {
+                            return (
+                              <div className="space-y-3 p-4 rounded-xl bg-card border border-border">
+                                {/* Release Summary */}
+                                <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 text-xs text-foreground font-medium flex items-start gap-2.5">
+                                  <Sparkles className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                                  <div>
+                                    <span className="font-semibold text-primary">Overview: </span>
+                                    <span>{doc.summary}</span>
+                                  </div>
+                                </div>
+
+                                {/* Highlights */}
+                                {doc.highlights && doc.highlights.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider font-mono flex items-center gap-1.5">
+                                      <Check className="w-3.5 h-3.5 text-emerald-500" /> Key Highlights
+                                    </span>
+                                    <div className="grid grid-cols-1 gap-1.5">
+                                      {doc.highlights.map((h, i) => (
+                                        <div key={i} className="flex items-start gap-2 bg-muted/40 p-2.5 rounded-lg border border-border/50 text-xs text-foreground">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+                                          <span>{h}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Features & Fixes Columns */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                  {doc.features && doc.features.length > 0 && (
+                                    <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-2">
+                                      <span className="text-[11px] font-semibold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                                        🚀 New Features & Enhancements
+                                      </span>
+                                      <ul className="space-y-1.5 text-xs text-muted-foreground">
+                                        {doc.features.map((f, i) => (
+                                          <li key={i} className="flex items-start gap-2">
+                                            <span className="text-emerald-500 font-bold">•</span>
+                                            <span>{f}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {doc.fixes && doc.fixes.length > 0 && (
+                                    <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-2">
+                                      <span className="text-[11px] font-semibold text-sky-500 uppercase tracking-wider flex items-center gap-1.5">
+                                        🛠️ Fixes & Improvements
+                                      </span>
+                                      <ul className="space-y-1.5 text-xs text-muted-foreground">
+                                        {doc.fixes.map((f, i) => (
+                                          <li key={i} className="flex items-start gap-2">
+                                            <span className="text-sky-500 font-bold">•</span>
+                                            <span>{f}</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Performance Notes */}
+                                {doc.performance && doc.performance.length > 0 && (
+                                  <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-2">
+                                    <span className="text-[11px] font-semibold text-purple-500 uppercase tracking-wider flex items-center gap-1.5">
+                                      ⚡ Performance & Resilience
+                                    </span>
+                                    <ul className="space-y-1.5 text-xs text-muted-foreground">
+                                      {doc.performance.map((p, i) => (
+                                        <li key={i} className="flex items-start gap-2">
+                                          <span className="text-purple-500 font-bold">•</span>
+                                          <span>{p}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+
+                          // Fallback to raw markdown body if no structured document
+                          return rel.body ? (
+                            <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60 text-xs text-muted-foreground font-mono whitespace-pre-line leading-relaxed max-h-56 overflow-y-auto">
+                              {rel.body}
+                            </div>
+                          ) : null;
+                        })()}
 
                         {/* Downloadable Assets */}
                         {rel.assets.length > 0 && (
-                          <div className="space-y-1.5">
+                          <div className="space-y-1.5 pt-1">
                             <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider font-mono">
                               Compiled Binaries & Checksums
                             </span>
@@ -508,97 +721,67 @@ export const UpdateTracker = () => {
         </CardContent>
       </Card>
 
-      {/* CI/CD Pipeline Architecture Card */}
-      <Card className="bg-card border border-border shadow-xs rounded-2xl">
-        <CardHeader className="p-5 pb-3 border-b border-border/50">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-muted-foreground" /> Automated Release Build Pipeline
-          </CardTitle>
-          <CardDescription className="text-xs text-muted-foreground">
-            Multi-target compilation orchestrated via GitHub Actions runners.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Runner: windows-latest</span>
-              <p className="font-semibold text-xs text-foreground">Windows x64 Installer</p>
-              <span className="text-[10px] text-muted-foreground">Tauri NSIS (*-setup.exe)</span>
-            </div>
+      {/* In-App Installation Progress Modal */}
+      {installingUpdate && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md border-primary/40 bg-card shadow-2xl rounded-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <CardHeader className="p-5 pb-3">
+              <CardTitle className="text-base font-bold flex items-center gap-2 text-foreground">
+                <DownloadCloud className="w-5 h-5 text-primary animate-bounce" />
+                Updating Server Command Center
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
+                Upgrading to {installingUpdate.tagName} without uninstalling.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-5 pt-2 space-y-4">
+              {installingUpdate.status === 'downloading' && (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground font-medium">Downloading update package...</span>
+                    <span className="font-mono font-bold text-primary">{installingUpdate.percent}%</span>
+                  </div>
 
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Runner: windows-latest</span>
-              <p className="font-semibold text-xs text-foreground">Portable Executable</p>
-              <span className="text-[10px] text-muted-foreground">server-command-center.exe</span>
-            </div>
+                  <div className="w-full bg-muted h-2.5 rounded-full overflow-hidden border border-border">
+                    <div 
+                      className="bg-primary h-full rounded-full transition-all duration-150 ease-out"
+                      style={{ width: `${installingUpdate.percent}%` }}
+                    />
+                  </div>
 
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Runner: ubuntu-latest</span>
-              <p className="font-semibold text-xs text-foreground">Android ARM64 Package</p>
-              <span className="text-[10px] text-muted-foreground">Rust aarch64 + APK Bundle</span>
-            </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
+                    <span>{formatFileSize(installingUpdate.downloadedBytes)} of {formatFileSize(installingUpdate.totalBytes)}</span>
+                    <span className="text-emerald-500 font-medium">In-Place Upgrade</span>
+                  </div>
+                </>
+              )}
 
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Security Checksums</span>
-              <p className="font-semibold text-xs text-foreground">SHA-256 Manifest</p>
-              <span className="text-[10px] text-muted-foreground">checksums-windows-x64.txt</span>
-            </div>
-          </div>
+              {installingUpdate.status === 'launching' && (
+                <div className="flex flex-col items-center justify-center py-4 gap-2 text-center">
+                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                  <p className="text-xs font-semibold text-foreground">Applying update and launching...</p>
+                  <p className="text-[11px] text-muted-foreground">The application will restart into {installingUpdate.tagName} in a moment.</p>
+                </div>
+              )}
 
-          <div className="flex items-center justify-between pt-4 mt-3 border-t border-border/50 text-xs">
-            <span className="text-muted-foreground">
-              Monitor active runner compilation and workflow executions:
-            </span>
-            <a
-              href={`https://github.com/${GITHUB_REPO}/actions`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary hover:underline flex items-center gap-1 font-medium text-xs"
-            >
-              GitHub Actions Logs <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Platform & Engine Architecture */}
-      <Card className="bg-card border border-border shadow-xs rounded-2xl">
-        <CardHeader className="p-5 pb-3 border-b border-border/50">
-          <CardTitle className="text-sm font-semibold flex items-center gap-2">
-            <Laptop className="w-4 h-4 text-muted-foreground" /> Platform & Engine Architecture
-          </CardTitle>
-          <CardDescription className="text-xs text-muted-foreground">
-            Runtime dependencies, local encrypted vault, and asynchronous networking core.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Application</span>
-              <p className="font-semibold text-xs text-foreground">Server Command Center</p>
-              <span className="text-[10px] text-muted-foreground">v{APP_VERSION} (Falah Tech)</span>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">SSH Core</span>
-              <p className="font-semibold text-xs text-foreground">russh 0.45</p>
-              <span className="text-[10px] text-muted-foreground">Pure Rust Async Engine</span>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Storage Engine</span>
-              <p className="font-semibold text-xs text-foreground">SQLite 3 (WAL Mode)</p>
-              <span className="text-[10px] text-muted-foreground">Local Encrypted Store</span>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-border bg-muted/40 space-y-1">
-              <span className="text-[10px] text-muted-foreground uppercase font-mono">Vault Encryption</span>
-              <p className="font-semibold text-xs text-foreground">Argon2id + AES-256</p>
-              <span className="text-[10px] text-muted-foreground">Hardware Keychain Support</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              {installingUpdate.status === 'error' && (
+                <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive space-y-2">
+                  <p className="font-semibold">Update encountered an issue:</p>
+                  <p className="font-mono text-[11px]">{installingUpdate.errorMessage}</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setInstallingUpdate(null)}
+                    className="mt-2 h-7 text-xs border-destructive/40"
+                  >
+                    Close
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

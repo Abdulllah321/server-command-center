@@ -197,6 +197,7 @@ pub fn run() {
         commands::files::delete_remote_paths,
         commands::files::change_remote_permissions,
         commands::files::search_remote_files,
+        commands::updater::download_and_install_update,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

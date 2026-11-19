@@ -826,3 +826,20 @@ export const searchRemoteFiles = async (serverId: string, path: string, query: s
   return await invoke('search_remote_files', { serverId, path, query });
 };
 
+export interface InstallUpdatePayload {
+  downloadUrl: string;
+  filename: string;
+  totalBytes: number;
+}
+
+export interface DownloadUpdateProgressPayload {
+  downloaded_bytes: number;
+  total_bytes: number;
+  percent: number;
+}
+
+export const downloadAndInstallUpdate = async (payload: InstallUpdatePayload): Promise<void> => {
+  return await invoke('download_and_install_update', { payload });
+};
+
+
