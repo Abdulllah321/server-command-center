@@ -839,7 +839,15 @@ export interface DownloadUpdateProgressPayload {
 }
 
 export const downloadAndInstallUpdate = async (payload: InstallUpdatePayload): Promise<void> => {
-  return await invoke('download_and_install_update', { payload });
+  return await invoke('download_and_install_update', { 
+    payload: {
+      downloadUrl: payload.downloadUrl,
+      download_url: payload.downloadUrl,
+      filename: payload.filename,
+      totalBytes: payload.totalBytes,
+      total_bytes: payload.totalBytes,
+    } 
+  });
 };
 
 

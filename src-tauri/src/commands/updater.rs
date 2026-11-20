@@ -11,10 +11,13 @@ pub struct DownloadUpdateProgressPayload {
     pub percent: u32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallUpdatePayload {
+    #[serde(alias = "download_url")]
     pub download_url: String,
     pub filename: String,
+    #[serde(default, alias = "total_bytes")]
     pub total_bytes: u64,
 }
 

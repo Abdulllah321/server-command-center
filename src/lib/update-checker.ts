@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.4';
+export const APP_VERSION = '1.1.5';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,24 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.5': {
+    summary: 'In-app updater argument serialization fix, cross-version payload compatibility, and S3 SigV4 base64 signer.',
+    highlights: [
+      'Resolved updater serialization error: supported both camelCase and snake_case for downloadUrl and totalBytes.',
+      'Smooth 1-Click in-app upgrade pipeline directly from the Updates & Releases interface.',
+      'Hardened remote S3 connection and backup engine against shell quoting issues.'
+    ],
+    features: [
+      'Universal Updater Serialization: In-app installer accepts camelCase (TypeScript) and snake_case (Rust) payloads interchangeably.',
+      'Progress Synchronization: Live percentage and downloaded megabytes display during asset acquisition.'
+    ],
+    fixes: [
+      'Fixed `invalid args payload for command download_and_install_update: missing field download_url` error.'
+    ],
+    performance: [
+      'Fast curl-based parallel asset retrieval with redirect resolution.'
+    ]
+  },
   'v1.1.4': {
     summary: 'S3 Connection Engine SigV4 fix, Base64 Python runner, and built-in terminal clipboard shortcuts.',
     highlights: [
