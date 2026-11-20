@@ -4,9 +4,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { RefreshCw, Trash2, Search, Copy, Type, Smartphone } from 'lucide-react';
+import { RefreshCw, Trash2, Search, Copy, ClipboardPaste, CheckSquare, Type, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
+import { cn } from 'cn';
 import { showIpcError, formatErrorMessage } from '@/lib/error-handler';
 import { MobileTerminalToolbar } from './MobileTerminalToolbar';
 import '@xterm/xterm/css/xterm.css';
@@ -40,12 +42,18 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, o
   const [fontSize, setFontSize] = useState<number>(14);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSoftKeys, setShowSoftKeys] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    hasSelection: boolean;
+  } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const handleSendKey = (str: string) => {
     if (!ptyIdRef.current) return;
     const encoder = new TextEncoder();
     const bytes = encoder.encode(str);
-    invoke('write_to_terminal', {
+    invoke('write_terminal', {
       sessionId: ptyIdRef.current,
       data: Array.from(bytes),
     }).catch(() => {});
@@ -76,6 +84,59 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, o
     const searchAddon = new SearchAddon();
     term.loadAddon(searchAddon);
     searchAddonRef.current = searchAddon;
+
+    // 2.5 Attach Key Handler for seamless Ctrl+C, Ctrl+V, Shift+Insert, Ctrl+Insert
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      const isCtrlOrMeta = event.ctrlKey || event.metaKey;
+
+      // Handle Copy: Ctrl+C / Ctrl+Shift+C / Cmd+C / Ctrl+Insert
+      if (
+        (isCtrlOrMeta && (event.key === 'c' || event.key === 'C')) ||
+        (event.ctrlKey && event.key === 'Insert')
+      ) {
+        if (term.hasSelection()) {
+          if (event.type === 'keydown') {
+            const selection = term.getSelection();
+            if (selection) {
+              navigator.clipboard.writeText(selection).catch((err) => {
+                console.warn('Failed to copy to clipboard:', err);
+              });
+            }
+          }
+          event.preventDefault();
+          return false; // Prevent xterm from sending \x03 (SIGINT) when copying text
+        }
+
+        // If Shift is pressed (e.g. Ctrl+Shift+C) with no selection, don't SIGINT
+        if (event.shiftKey) {
+          event.preventDefault();
+          return false;
+        }
+
+        // When NO text is selected, let xterm send \x03 (SIGINT) to cancel running command
+        return true;
+      }
+
+      // Handle Paste: Ctrl+V / Ctrl+Shift+V / Cmd+V / Shift+Insert
+      if (
+        (isCtrlOrMeta && (event.key === 'v' || event.key === 'V')) ||
+        (event.shiftKey && event.key === 'Insert')
+      ) {
+        if (event.type === 'keydown') {
+          navigator.clipboard.readText().then((clipText) => {
+            if (clipText && xtermRef.current) {
+              xtermRef.current.paste(clipText);
+            }
+          }).catch((err) => {
+            console.warn('Failed to read from clipboard:', err);
+          });
+        }
+        event.preventDefault();
+        return false; // Prevent xterm from sending raw \x16 character
+      }
+
+      return true;
+    });
 
     // 3. Open terminal in DOM container
     term.open(terminalRef.current);
@@ -233,10 +294,49 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, o
     if (xtermRef.current) {
       const selection = xtermRef.current.getSelection();
       if (selection) {
-        navigator.clipboard.writeText(selection);
+        navigator.clipboard.writeText(selection).then(() => {
+          toast.success('Selection copied to clipboard', { duration: 1500 });
+        }).catch(() => {
+          toast.error('Failed to copy selection');
+        });
+      } else {
+        toast.info('Highlight text in the terminal first to copy', { duration: 2000 });
       }
     }
   }, []);
+
+  const doPaste = useCallback(() => {
+    navigator.clipboard.readText().then((text) => {
+      if (text && xtermRef.current) {
+        xtermRef.current.paste(text);
+        xtermRef.current.focus();
+        toast.success('Pasted clipboard content', { duration: 1500 });
+      } else if (!text) {
+        toast.info('Clipboard is empty', { duration: 1500 });
+      }
+    }).catch(() => {
+      toast.error('Failed to read clipboard');
+    });
+  }, []);
+
+  // Close custom context menu on outside click or Escape key
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('mousedown', handleOutsideClick);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
 
   const changeFontSize = useCallback((delta: number) => {
     setFontSize(prev => {
@@ -293,14 +393,17 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, o
         <Button variant="ghost" size="icon" onClick={doReconnect} title="Reconnect" className="h-7 w-7 text-muted-foreground hover:text-foreground">
           <RefreshCw className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" onClick={doClear} title="Clear Terminal" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+        <Button variant="ghost" size="icon" onClick={doClear} title="Clear Terminal (Ctrl+L)" className="h-7 w-7 text-muted-foreground hover:text-foreground">
           <Trash2 className="h-4 w-4" />
         </Button>
         
         <div className="w-px h-4 bg-white/10 mx-1" />
         
-        <Button variant="ghost" size="icon" onClick={doCopy} title="Copy Selection" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+        <Button variant="ghost" size="icon" onClick={doCopy} title="Copy Selection (Ctrl+C)" className="h-7 w-7 text-muted-foreground hover:text-foreground">
           <Copy className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="icon" onClick={doPaste} title="Paste Clipboard (Ctrl+V)" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+          <ClipboardPaste className="h-4 w-4" />
         </Button>
         
         <div className="w-px h-4 bg-white/10 mx-1" />
@@ -341,7 +444,108 @@ export const Terminal: React.FC<TerminalProps> = ({ serverId, isActive = true, o
       <div 
         className="flex-1 w-full relative overflow-hidden" 
         ref={terminalRef}
+        onClick={() => xtermRef.current?.focus()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (!xtermRef.current) return;
+          setContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            hasSelection: xtermRef.current.hasSelection(),
+          });
+        }}
       />
+
+      {/* Sleek Custom Terminal Context Menu */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 min-w-[170px] bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-lg shadow-2xl p-1 text-xs text-zinc-200 animate-in fade-in zoom-in-95 duration-100"
+          style={{
+            top: Math.min(contextMenu.y, window.innerHeight - 170),
+            left: Math.min(contextMenu.x, window.innerWidth - 190),
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            disabled={!contextMenu.hasSelection}
+            onClick={() => {
+              const selection = xtermRef.current?.getSelection();
+              if (selection) {
+                navigator.clipboard.writeText(selection);
+                toast.success('Copied to clipboard', { duration: 1500 });
+              }
+              setContextMenu(null);
+              xtermRef.current?.focus();
+            }}
+            className={cn(
+              "w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left transition-colors",
+              contextMenu.hasSelection
+                ? "hover:bg-zinc-800 text-zinc-100 cursor-pointer"
+                : "text-zinc-500 cursor-not-allowed opacity-50"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy</span>
+            </div>
+            <kbd className="text-[10px] font-mono text-zinc-400">Ctrl+C</kbd>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.readText().then((text) => {
+                if (text && xtermRef.current) {
+                  xtermRef.current.paste(text);
+                }
+              }).catch(() => {});
+              setContextMenu(null);
+              xtermRef.current?.focus();
+            }}
+            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left hover:bg-zinc-800 text-zinc-100 cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <ClipboardPaste className="w-3.5 h-3.5" />
+              <span>Paste</span>
+            </div>
+            <kbd className="text-[10px] font-mono text-zinc-400">Ctrl+V</kbd>
+          </button>
+
+          <div className="h-px bg-zinc-800 my-1" />
+
+          <button
+            type="button"
+            onClick={() => {
+              xtermRef.current?.selectAll();
+              setContextMenu(null);
+            }}
+            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left hover:bg-zinc-800 text-zinc-100 cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span>Select All</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              doClear();
+              setContextMenu(null);
+              xtermRef.current?.focus();
+            }}
+            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded text-left hover:bg-zinc-800 text-zinc-100 cursor-pointer transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Clear Terminal</span>
+            </div>
+            <kbd className="text-[10px] font-mono text-zinc-400">Ctrl+L</kbd>
+          </button>
+        </div>
+      )}
 
       {/* Mobile/Touch Terminal Auxiliary Soft-Keys Bar */}
       {showSoftKeys && (

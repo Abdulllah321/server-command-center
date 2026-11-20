@@ -18,9 +18,7 @@ import {
   GitCommit,
   GitBranch,
   ChevronDown,
-  ChevronUp,
-  Cpu,
-  Laptop
+  ChevronUp
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from 'cn';
@@ -348,7 +346,7 @@ export const UpdateTracker = () => {
                             isNewer: true,
                             assets: [{
                               name: `Server.Command.Center_${updateResult.latestVersion}_x64-setup.exe`,
-                              downloadUrl: updateResult.exeInstallerUrl,
+                              downloadUrl: updateResult.exeInstallerUrl || updateResult.htmlUrl,
                               size: 0,
                               downloadCount: 0,
                               type: 'installer',

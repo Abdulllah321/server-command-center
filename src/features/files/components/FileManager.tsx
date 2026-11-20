@@ -45,7 +45,6 @@ import {
 import { 
   listRemoteFiles, 
   downloadRemoteFile, 
-  uploadRemoteFile, 
   uploadRemoteFileChunk,
   cancelRemoteFileUpload,
   createRemoteDirectory, 
