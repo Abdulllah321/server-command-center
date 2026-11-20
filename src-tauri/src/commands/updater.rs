@@ -109,3 +109,4 @@ pub async fn download_and_install_update(
 
     Ok(())
 }
+

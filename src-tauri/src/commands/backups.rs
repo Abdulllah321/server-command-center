@@ -1869,16 +1869,8 @@ pub async fn test_cloud_storage_connection(
             return Err(CommandError::Validation("Access Key ID and Secret Access Key are required".into()));
         }
 
-        let test_cmd = format!(
-            r#"bash -c '
-if command -v aws >/dev/null 2>&1; then
-    ENDPOINT_FLAG=""
-    [ -n "{endpoint}" ] && ENDPOINT_FLAG="--endpoint-url {endpoint}"
-    AWS_ACCESS_KEY_ID="{akey}" AWS_SECRET_ACCESS_KEY="{skey}" AWS_DEFAULT_REGION="{region}" \
-    aws s3 ls "s3://{bucket}" $ENDPOINT_FLAG >/dev/null 2>&1 && echo "S3_SUCCESS" || echo "S3_FAILED"
-else
-    python3 - << '\''PY_EOF'\''
-import sys, datetime, hashlib, hmac, urllib.request, urllib.error
+        let py_script = format!(
+            r#"import sys, datetime, hashlib, hmac, urllib.request, urllib.error
 
 bucket = "{bucket}"
 region = "{region}"
@@ -1956,15 +1948,31 @@ except urllib.error.HTTPError as e:
         print(f"S3_HTTP_{{e.code}}: {{err_body}}")
 except Exception as e:
     print(f"S3_ERR_{{e}}")
-PY_EOF
-fi
-'
 "#,
+            bucket = bucket.replace('\\', "\\\\").replace('"', "\\\""),
+            region = region.replace('\\', "\\\\").replace('"', "\\\""),
+            endpoint = endpoint.replace('\\', "\\\\").replace('"', "\\\""),
+            akey = akey.replace('\\', "\\\\").replace('"', "\\\""),
+            skey = skey.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+
+        let py_b64 = b64.encode(py_script.as_bytes());
+
+        let test_cmd = format!(
+            r#"if command -v aws >/dev/null 2>&1; then
+    ENDPOINT_FLAG=""
+    [ -n "{endpoint}" ] && ENDPOINT_FLAG="--endpoint-url {endpoint}"
+    AWS_ACCESS_KEY_ID="{akey}" AWS_SECRET_ACCESS_KEY="{skey}" AWS_DEFAULT_REGION="{region}" \
+    aws s3 ls "s3://{bucket}" $ENDPOINT_FLAG >/dev/null 2>&1 && echo "S3_SUCCESS" || echo "S3_FAILED"
+else
+    python3 -c "import base64; exec(base64.b64decode('{py_b64}').decode('utf-8'))"
+fi"#,
             bucket = escape_bash(bucket),
             region = escape_bash(region),
             endpoint = escape_bash(endpoint),
             akey = escape_bash(akey),
-            skey = escape_bash(skey)
+            skey = escape_bash(skey),
+            py_b64 = py_b64
         );
 
         let out = exec_ssh_command_full(&mut session, &test_cmd, Duration::from_secs(20)).await?;
@@ -2052,38 +2060,12 @@ pub async fn upload_backup_to_cloud(
             return Err(CommandError::Validation("Dropbox token cannot be empty".into()));
         }
 
-        let upload_cmd = format!(
-            r#"bash -c '
-set -e
-DEST="{dest_file}"
-TOKEN="{token}"
-FOLDER="{folder}"
-FNAME=$(basename "$DEST")
-TARGET="${{FOLDER%/}}/${{FNAME}}"
-[[ "$TARGET" != /* ]] && TARGET="/$TARGET"
+        let py_script = format!(
+            r#"import sys, os, json, urllib.request
 
-FSIZE=$(stat -c%s "$DEST" 2>/dev/null || stat -f%z "$DEST" 2>/dev/null || echo 0)
-
-if [ "$FSIZE" -le 146800640 ]; then
-    RESP=$(curl -s -X POST https://content.dropboxapi.com/2/files/upload \
-      --header "Authorization: Bearer $TOKEN" \
-      --header "Dropbox-API-Arg: {{\"path\": \"$TARGET\",\"mode\": \"add\",\"autorename\": true,\"mute\": false}}" \
-      --header "Content-Type: application/octet-stream" \
-      --data-binary @"$DEST")
-
-    if echo "$RESP" | grep -q "\"id\":"; then
-        echo "SUCCESS:$TARGET"
-    else
-        echo "ERROR:$RESP" >&2
-        exit 1
-    fi
-else
-    DEST="$DEST" TOKEN="$TOKEN" TARGET="$TARGET" python3 - << '\''PY_EOF'\''
-import sys, os, json, urllib.request
-
-token = os.environ.get("TOKEN", "")
-file_path = os.environ.get("DEST", "")
-target_path = os.environ.get("TARGET", "")
+token = "{token}"
+file_path = "{dest_file}"
+target_path = "{target_path}"
 file_size = os.path.getsize(file_path)
 CHUNK_SIZE = 16 * 1024 * 1024
 
@@ -2138,13 +2120,44 @@ try:
 except Exception as e:
     print(f"ERROR:{{e}}", file=sys.stderr)
     sys.exit(1)
-PY_EOF
-fi
-'
 "#,
+            token = token.replace('\\', "\\\\").replace('"', "\\\""),
+            dest_file = dest_file.replace('\\', "\\\\").replace('"', "\\\""),
+            target_path = format!("{}/{}", folder.trim_end_matches('/'), std::path::Path::new(&dest_file).file_name().and_then(|f| f.to_str()).unwrap_or("backup.tar.gz")).replace('\\', "\\\\").replace('"', "\\\"")
+        );
+
+        let py_b64 = b64.encode(py_script.as_bytes());
+
+        let upload_cmd = format!(
+            r#"DEST="{dest_file}"
+TOKEN="{token}"
+FOLDER="{folder}"
+FNAME=$(basename "$DEST")
+TARGET="${{FOLDER%/}}/${{FNAME}}"
+[[ "$TARGET" != /* ]] && TARGET="/$TARGET"
+
+FSIZE=$(stat -c%s "$DEST" 2>/dev/null || stat -f%z "$DEST" 2>/dev/null || echo 0)
+
+if [ "$FSIZE" -le 146800640 ]; then
+    RESP=$(curl -s -X POST https://content.dropboxapi.com/2/files/upload \
+      --header "Authorization: Bearer $TOKEN" \
+      --header "Dropbox-API-Arg: {{\"path\": \"$TARGET\",\"mode\": \"add\",\"autorename\": true,\"mute\": false}}" \
+      --header "Content-Type: application/octet-stream" \
+      --data-binary @"$DEST")
+
+    if echo "$RESP" | grep -q "\"id\":"; then
+        echo "SUCCESS:$TARGET"
+    else
+        echo "ERROR:$RESP" >&2
+        exit 1
+    fi
+else
+    python3 -c "import base64; exec(base64.b64decode('{py_b64}').decode('utf-8'))"
+fi"#,
             dest_file = escape_bash(&dest_file),
             token = escape_bash(token),
-            folder = escape_bash(folder)
+            folder = escape_bash(folder),
+            py_b64 = py_b64
         );
 
         let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(1800)).await?;
@@ -2185,36 +2198,16 @@ fi
             return Err(CommandError::Validation("Bucket, Access Key, and Secret Key are required for S3 upload".into()));
         }
 
-        let upload_cmd = format!(
-            r#"bash -c '
-set -e
-DEST="{dest_file}"
-BUCKET="{bucket}"
-REGION="{region}"
-ENDPOINT="{endpoint}"
-AKEY="{akey}"
-SKEY="{skey}"
-PREFIX="{prefix}"
-FNAME="$(basename "$DEST")"
-SKEY_PATH="${{PREFIX:+${{PREFIX%/}}/}}${{FNAME}}"
+        let py_script = format!(
+            r#"import sys, os, datetime, hashlib, hmac, urllib.request
 
-if command -v aws >/dev/null 2>&1; then
-    ENDPOINT_FLAG=""
-    [ -n "$ENDPOINT" ] && ENDPOINT_FLAG="--endpoint-url $ENDPOINT"
-    AWS_ACCESS_KEY_ID="$AKEY" AWS_SECRET_ACCESS_KEY="$SKEY" AWS_DEFAULT_REGION="$REGION" \
-    aws s3 cp "$DEST" "s3://${{BUCKET}}/${{SKEY_PATH}}" $ENDPOINT_FLAG
-    echo "SUCCESS:s3://${{BUCKET}}/${{SKEY_PATH}}"
-else
-    python3 - << '\''PY_EOF'\''
-import sys, os, datetime, hashlib, hmac, urllib.request
-
-bucket = os.environ.get("BUCKET", "{bucket}")
-region = os.environ.get("REGION", "{region}")
-endpoint = os.environ.get("ENDPOINT", "{endpoint}")
-access_key = os.environ.get("AKEY", "{akey}")
-secret_key = os.environ.get("SKEY", "{skey}")
-prefix = os.environ.get("PREFIX", "{prefix}")
-file_path = os.environ.get("DEST", "{dest_file}")
+bucket = "{bucket}"
+region = "{region}"
+endpoint = "{endpoint}"
+access_key = "{akey}"
+secret_key = "{skey}"
+prefix = "{prefix}"
+file_path = "{dest_file}"
 
 if not file_path or not os.path.exists(file_path):
     print("ERROR: File not found", file=sys.stderr)
@@ -2287,17 +2280,46 @@ with open(file_path, "rb") as f:
     except Exception as e:
         print(f"ERROR:{{e}}", file=sys.stderr)
         sys.exit(1)
-PY_EOF
-fi
-'
 "#,
+            bucket = bucket.replace('\\', "\\\\").replace('"', "\\\""),
+            region = region.replace('\\', "\\\\").replace('"', "\\\""),
+            endpoint = endpoint.replace('\\', "\\\\").replace('"', "\\\""),
+            akey = akey.replace('\\', "\\\\").replace('"', "\\\""),
+            skey = skey.replace('\\', "\\\\").replace('"', "\\\""),
+            prefix = prefix.replace('\\', "\\\\").replace('"', "\\\""),
+            dest_file = dest_file.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+
+        let py_b64 = b64.encode(py_script.as_bytes());
+
+        let upload_cmd = format!(
+            r#"DEST="{dest_file}"
+BUCKET="{bucket}"
+REGION="{region}"
+ENDPOINT="{endpoint}"
+AKEY="{akey}"
+SKEY="{skey}"
+PREFIX="{prefix}"
+FNAME="$(basename "$DEST")"
+SKEY_PATH="${{PREFIX:+${{PREFIX%/}}/}}${{FNAME}}"
+
+if command -v aws >/dev/null 2>&1; then
+    ENDPOINT_FLAG=""
+    [ -n "$ENDPOINT" ] && ENDPOINT_FLAG="--endpoint-url $ENDPOINT"
+    AWS_ACCESS_KEY_ID="$AKEY" AWS_SECRET_ACCESS_KEY="$SKEY" AWS_DEFAULT_REGION="$REGION" \
+    aws s3 cp "$DEST" "s3://${{BUCKET}}/${{SKEY_PATH}}" $ENDPOINT_FLAG
+    echo "SUCCESS:s3://${{BUCKET}}/${{SKEY_PATH}}"
+else
+    python3 -c "import base64; exec(base64.b64decode('{py_b64}').decode('utf-8'))"
+fi"#,
             dest_file = escape_bash(&dest_file),
             bucket = escape_bash(bucket),
             region = escape_bash(region),
             endpoint = escape_bash(endpoint),
             akey = escape_bash(akey),
             skey = escape_bash(skey),
-            prefix = escape_bash(prefix)
+            prefix = escape_bash(prefix),
+            py_b64 = py_b64
         );
 
         let out = exec_ssh_command_full(&mut session, &upload_cmd, Duration::from_secs(1800)).await?;

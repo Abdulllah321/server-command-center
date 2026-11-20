@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.3';
+export const APP_VERSION = '1.1.4';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,25 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.4': {
+    summary: 'S3 Connection Engine SigV4 fix, Base64 Python runner, and built-in terminal clipboard shortcuts.',
+    highlights: [
+      'Fixed S3 test connection and backup upload: replaced shell heredocs with immune Base64 Python execution.',
+      'Resolved Python strftime syntax error (`invalid syntax at %Y%m%dT%H%M%SZ`) caused by shell quote nesting.',
+      'Native Terminal Clipboard: Full support for Ctrl+C (smart copy/SIGINT), Ctrl+V (paste), toolbar buttons, and sleek context menu.'
+    ],
+    features: [
+      'Base64 Pure-Python Runner: Cloud connectors now execute via Base64 decoding, completely preventing shell quote stripping.',
+      'Enhanced Terminal UX: Smart Ctrl+C copies highlighted text without cancelling active remote processes.'
+    ],
+    fixes: [
+      'Fixed S3 connection failure: eliminated `SyntaxError: invalid syntax` in AWS SigV4 signer on remote hosts without aws-cli.',
+      'Fixed Dropbox large archive upload chunking script quotation over SSH.'
+    ],
+    performance: [
+      'Instant connection validation and zero-dependency cloud backups across all Linux server distributions.'
+    ]
+  },
   'v1.1.3': {
     summary: '1-Click In-App Seamless Updater, Documented Release Changelogs, and Developer Diagnostics cleanup.',
     highlights: [
