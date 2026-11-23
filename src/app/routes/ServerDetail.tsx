@@ -47,9 +47,19 @@ import { getServer, deleteServer, requestConfirmation, restartPm2Process, reload
 import { usePm2Processes } from '@/features/pm2/api';
 import { showIpcError } from '@/lib/error-handler';
 import { toast } from 'sonner';
+import { useWorkspaceTabsStore } from '@/stores/use-workspace-tabs-store';
 
-export const ServerDetail = () => {
-  const { id } = useParams();
+interface ServerDetailProps {
+  serverId?: string;
+  isActive?: boolean;
+}
+
+export const ServerDetail: React.FC<ServerDetailProps> = ({
+  serverId: propServerId,
+  isActive = true
+}) => {
+  const { id: paramId } = useParams();
+  const id = propServerId || paramId;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -79,6 +89,13 @@ export const ServerDetail = () => {
     queryFn: () => getServer(id!),
     enabled: !!id,
   });
+
+  // Keep workspace tab title synchronized with real server name
+  useEffect(() => {
+    if (id && server?.name) {
+      useWorkspaceTabsStore.getState().updateTabTitle(`server-${id}`, server.name);
+    }
+  }, [id, server?.name]);
 
   const { data: pm2Processes } = usePm2Processes(id || '', 15000);
 
@@ -486,7 +503,7 @@ export const ServerDetail = () => {
             activeTab !== 'terminal' && "!hidden"
           )}
         >
-          <TerminalTabManager serverId={id} />
+          <TerminalTabManager serverId={id!} isParentActive={isActive && activeTab === 'terminal'} />
         </TabsContent>
 
         {/* Tab 6: Nginx Proxy */}

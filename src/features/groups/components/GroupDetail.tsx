@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useGroup } from '../api';
 import { listServers, testConnection, type Server } from '@/lib/tauri-client';
@@ -7,11 +7,23 @@ import { ServerCard } from '@/features/servers/components/ServerCard';
 import { Folder, RefreshCw, Trash2, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useConfirmAction } from '@/components/shared/ConfirmationModal';
+import { useWorkspaceTabsStore } from '@/stores/use-workspace-tabs-store';
 
-export const GroupDetail = () => {
-  const { id } = useParams<{ id: string }>();
+interface GroupDetailProps {
+  groupId?: string;
+}
+
+export const GroupDetail: React.FC<GroupDetailProps> = ({ groupId: propGroupId }) => {
+  const { id: paramId } = useParams<{ id: string }>();
+  const id = propGroupId || paramId;
   const { data: group, isLoading: isGroupLoading } = useGroup(id || '');
   const { data: servers, isLoading: isServersLoading } = useQuery({ queryKey: ['servers'], queryFn: listServers });
+
+  useEffect(() => {
+    if (id && group?.name) {
+      useWorkspaceTabsStore.getState().updateTabTitle(`group-${id}`, group.name);
+    }
+  }, [id, group?.name]);
 
   if (isGroupLoading || isServersLoading) {
     return <div className="p-6 text-muted-foreground animate-pulse">Loading group details...</div>;

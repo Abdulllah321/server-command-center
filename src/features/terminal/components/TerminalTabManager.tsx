@@ -11,9 +11,13 @@ interface Tab {
 
 interface TerminalTabManagerProps {
   serverId: string;
+  isParentActive?: boolean;
 }
 
-export const TerminalTabManager: React.FC<TerminalTabManagerProps> = ({ serverId }) => {
+export const TerminalTabManager: React.FC<TerminalTabManagerProps> = ({ 
+  serverId, 
+  isParentActive = true 
+}) => {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
@@ -101,7 +105,7 @@ export const TerminalTabManager: React.FC<TerminalTabManagerProps> = ({ serverId
             >
               <Terminal 
                 serverId={serverId} 
-                isActive={activeTabId === tab.id}
+                isActive={isParentActive && activeTabId === tab.id}
                 onStatusChange={(status) => updateTabStatus(tab.id, status)}
               />
             </div>
