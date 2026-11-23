@@ -1,6 +1,6 @@
 [package]
 name = "server-command-center"
-version = "1.2.0"
+version = "1.2.1"
 description = "Server Command Center Desktop Application"
 authors = ["Falah Tech (falah-tech.com)"]
 edition = "2021"

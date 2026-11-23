@@ -10,9 +10,24 @@ import { openExternalUrl } from './lib/tauri-client'
 if (typeof window !== 'undefined') {
   document.addEventListener('click', (e) => {
     const anchor = (e.target as HTMLElement)?.closest('a');
-    if (anchor && anchor.href && (anchor.href.startsWith('http://') || anchor.href.startsWith('https://'))) {
-      e.preventDefault();
-      openExternalUrl(anchor.href);
+    if (!anchor || !anchor.href) return;
+
+    try {
+      const url = new URL(anchor.href, window.location.href);
+      // Strictly isolate internal SPA routes from external web links
+      const isInternal =
+        url.origin === window.location.origin ||
+        url.hostname === 'tauri.localhost' ||
+        url.hostname === 'localhost' ||
+        url.protocol === 'tauri:' ||
+        url.protocol === 'javascript:';
+
+      if (!isInternal && (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:')) {
+        e.preventDefault();
+        openExternalUrl(anchor.href);
+      }
+    } catch {
+      // Ignore URL parsing errors and allow standard navigation
     }
   });
 

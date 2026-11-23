@@ -149,6 +149,11 @@ pub async fn open_external_url(url: String) -> CommandResult<()> {
         return Err(CommandError::Validation("Invalid URL protocol. Only HTTP, HTTPS, and mailto URLs can be opened externally.".into()));
     }
 
+    // Safety guard: never dispatch internal Tauri webview origins to the external browser
+    if trimmed.contains("tauri.localhost") || trimmed.starts_with("tauri://") {
+        return Ok(());
+    }
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;

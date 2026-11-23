@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.2.1';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,24 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.1': {
+    summary: 'Isolated internal SPA routes from external link interceptor, ensuring internal navigation (dashboard, servers, tabs, settings) stays seamlessly inside the app.',
+    highlights: [
+      'Strict Route Isolation: Internal navigation links (`/server/*`, `/activity`, `/settings`) stay 100% inside the desktop window.',
+      'Eliminated `tauri.localhost` External Browser Tabs: Resolved issue where clicking internal links was erroneously opening `http://tauri.localhost/` in external browser tabs.',
+      'Dual Guard Architecture: Frontend URL parser checks origin and hostname while backend rejects any `tauri.localhost` browser dispatch requests.',
+      'Preserved External Link Routing: External links (GitHub, documentation, downloads, falah-tech.com) continue opening cleanly in your default browser.'
+    ],
+    features: [
+      'Origin-Aware Link Delegation: Smart domain resolution differentiates between internal client router links and third-party web targets.'
+    ],
+    fixes: [
+      'Fixed inner pages (e.g. `http://tauri.localhost/`) opening in external browser tabs on link clicks.'
+    ],
+    performance: [
+      'Instant client-side link resolution without unnecessary IPC dispatches for internal routes.'
+    ]
+  },
   'v1.2.0': {
     summary: 'Native OS browser routing for all external links and release assets, eliminating broken WebView navigation and suppressing useless default browser context menus.',
     highlights: [
