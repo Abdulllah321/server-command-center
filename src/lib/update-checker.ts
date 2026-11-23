@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.8';
+export const APP_VERSION = '1.1.9';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,26 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.9': {
+    summary: 'Resolved file upload chunk payload deserialization conflict, ensuring seamless large file (1 GB+) streaming uploads with zero server memory footprint.',
+    highlights: [
+      'Eliminated `invalid args payload for command upload_remote_file_chunk: missing field server_id` error.',
+      'Flexible Field Deserialization: Custom deserializer resolves both camelCase and snake_case upload metadata without serde derive conflicts.',
+      'Resilient Multi-Gigabyte SFTP Uploads: High-performance 1 MB binary chunk streaming with atomic reassembly and progress tracking.',
+      'Guaranteed Fallback: Backend accepts both wrapped payloads and flat top-level parameters for all remote file upload and cancellation calls.'
+    ],
+    features: [
+      'Zero-Daemon Chunked Uploads: Streams files up to multiple gigabytes directly into remote disk with zero daemon dependencies.',
+      'Auto-Cleanup on Cancel: Gracefully terminates active streams and purges temporary chunk files upon cancellation.'
+    ],
+    fixes: [
+      'Fixed `missing field server_id` error on chunk 0 of file upload.',
+      'Fixed upload cancellation parameter alignment between frontend and backend.'
+    ],
+    performance: [
+      'Minimal client and server memory consumption using slice-by-slice base64 streaming over pooled SSH channels.'
+    ]
+  },
   'v1.1.8': {
     summary: 'Resolved server ID argument mismatch in backup CRON schedule creation, toggle, delete, and manual run commands, with full cloud storage integration.',
     highlights: [

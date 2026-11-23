@@ -822,11 +822,52 @@ export const uploadRemoteFile = async (serverId: string, remoteDir: string, file
 };
 
 export const uploadRemoteFileChunk = async (payload: UploadFileChunkPayload): Promise<void> => {
-  return await invoke('upload_remote_file_chunk', { payload });
+  return await invoke('upload_remote_file_chunk', {
+    payload: {
+      serverId: payload.serverId,
+      server_id: payload.serverId,
+      remoteDir: payload.remoteDir,
+      remote_dir: payload.remoteDir,
+      filename: payload.filename,
+      uploadId: payload.uploadId,
+      upload_id: payload.uploadId,
+      chunkIndex: payload.chunkIndex,
+      chunk_index: payload.chunkIndex,
+      totalChunks: payload.totalChunks,
+      total_chunks: payload.totalChunks,
+      totalSize: payload.totalSize,
+      total_size: payload.totalSize,
+      base64Chunk: payload.base64Chunk,
+      base64_chunk: payload.base64Chunk,
+    },
+    serverId: payload.serverId,
+    server_id: payload.serverId,
+    remoteDir: payload.remoteDir,
+    remote_dir: payload.remoteDir,
+    filename: payload.filename,
+    uploadId: payload.uploadId,
+    upload_id: payload.uploadId,
+    chunkIndex: payload.chunkIndex,
+    chunk_index: payload.chunkIndex,
+    totalChunks: payload.totalChunks,
+    total_chunks: payload.totalChunks,
+    totalSize: payload.totalSize,
+    total_size: payload.totalSize,
+    base64Chunk: payload.base64Chunk,
+    base64_chunk: payload.base64Chunk,
+  });
 };
 
 export const cancelRemoteFileUpload = async (serverId: string, remoteDir: string, filename: string, uploadId: string): Promise<void> => {
-  return await invoke('cancel_remote_file_upload', { serverId, remoteDir, filename, uploadId });
+  return await invoke('cancel_remote_file_upload', {
+    serverId,
+    server_id: serverId,
+    remoteDir,
+    remote_dir: remoteDir,
+    filename,
+    uploadId,
+    upload_id: uploadId,
+  });
 };
 
 export const createRemoteDirectory = async (serverId: string, path: string): Promise<void> => {

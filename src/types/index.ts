@@ -384,13 +384,20 @@ export interface DownloadedFilePayload {
 
 export interface UploadFileChunkPayload {
   serverId: string;
+  server_id?: string;
   remoteDir: string;
+  remote_dir?: string;
   filename: string;
   uploadId: string;
+  upload_id?: string;
   chunkIndex: number;
+  chunk_index?: number;
   totalChunks: number;
+  total_chunks?: number;
   totalSize: number;
+  total_size?: number;
   base64Chunk: string;
+  base64_chunk?: string;
 }
 
 

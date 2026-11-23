@@ -54,7 +54,7 @@ pub struct DownloadedFilePayload {
     pub is_archive: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UploadFileChunkPayload {
     pub server_id: String,
     pub remote_dir: String,
@@ -64,6 +64,70 @@ pub struct UploadFileChunkPayload {
     pub total_chunks: usize,
     pub total_size: u64,
     pub base64_chunk: String,
+}
+
+impl<'de> Deserialize<'de> for UploadFileChunkPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let val = serde_json::Value::deserialize(deserializer)?;
+
+        let server_id = val.get("serverId")
+            .or_else(|| val.get("server_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let remote_dir = val.get("remoteDir")
+            .or_else(|| val.get("remote_dir"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let filename = val.get("filename")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let upload_id = val.get("uploadId")
+            .or_else(|| val.get("upload_id"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let chunk_index = val.get("chunkIndex")
+            .or_else(|| val.get("chunk_index"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let total_chunks = val.get("totalChunks")
+            .or_else(|| val.get("total_chunks"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let total_size = val.get("totalSize")
+            .or_else(|| val.get("total_size"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let base64_chunk = val.get("base64Chunk")
+            .or_else(|| val.get("base64_chunk"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        Ok(UploadFileChunkPayload {
+            server_id,
+            remote_dir,
+            filename,
+            upload_id,
+            chunk_index,
+            total_chunks,
+            total_size,
+            base64_chunk,
+        })
+    }
 }
 
 /// Helper to execute a command over SSH with a strict timeout and zero server memory footprint
@@ -655,8 +719,31 @@ pub async fn upload_remote_file(
 pub async fn upload_remote_file_chunk(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    payload: UploadFileChunkPayload,
+    payload: Option<UploadFileChunkPayload>,
+    server_id: Option<String>,
+    remote_dir: Option<String>,
+    filename: Option<String>,
+    upload_id: Option<String>,
+    chunk_index: Option<usize>,
+    total_chunks: Option<usize>,
+    total_size: Option<u64>,
+    base64_chunk: Option<String>,
 ) -> CommandResult<()> {
+    let payload = if let Some(p) = payload {
+        p
+    } else {
+        UploadFileChunkPayload {
+            server_id: server_id.unwrap_or_default(),
+            remote_dir: remote_dir.unwrap_or_default(),
+            filename: filename.unwrap_or_default(),
+            upload_id: upload_id.unwrap_or_default(),
+            chunk_index: chunk_index.unwrap_or(0),
+            total_chunks: total_chunks.unwrap_or(1),
+            total_size: total_size.unwrap_or(0),
+            base64_chunk: base64_chunk.unwrap_or_default(),
+        }
+    };
+
     if payload.server_id.is_empty() || payload.remote_dir.is_empty() || payload.filename.is_empty() {
         return Err(CommandError::Validation("Server ID, remote dir, and filename required".into()));
     }
@@ -729,22 +816,27 @@ pub async fn upload_remote_file_chunk(
 pub async fn cancel_remote_file_upload(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    server_id: String,
-    remote_dir: String,
-    filename: String,
-    upload_id: String,
+    server_id: Option<String>,
+    remote_dir: Option<String>,
+    filename: Option<String>,
+    upload_id: Option<String>,
 ) -> CommandResult<()> {
-    if server_id.is_empty() || remote_dir.is_empty() || filename.is_empty() || upload_id.is_empty() {
+    let sid = server_id.unwrap_or_default();
+    let rdir = remote_dir.unwrap_or_default();
+    let fname = filename.unwrap_or_default();
+    let uid = upload_id.unwrap_or_default();
+
+    if sid.is_empty() || rdir.is_empty() || fname.is_empty() || uid.is_empty() {
         return Ok(());
     }
 
-    let safe_filename = filename.replace('/', "").replace('\\', "").replace("..", "");
-    let safe_upload_id: String = upload_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
-    let target_dir = remote_dir.trim_end_matches('/');
+    let safe_filename = fname.replace('/', "").replace('\\', "").replace("..", "");
+    let safe_upload_id: String = uid.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    let target_dir = rdir.trim_end_matches('/');
     let tmp_file = format!("{}/.{}.tmp.{}", target_dir, safe_filename, safe_upload_id);
 
     let session_arc = state.session_manager
-        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .get_or_connect(sid.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
