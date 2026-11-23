@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Automated Release Publisher for Server Command Center
     Powered by Falah Tech (falah-tech.com)
@@ -13,7 +13,7 @@
 
 param (
     [Parameter(Mandatory=$false)]
-    [string]$Version = "1.1.9"
+    [string]$Version = "1.2.0"
 )
 
 $ErrorActionPreference = "Stop"

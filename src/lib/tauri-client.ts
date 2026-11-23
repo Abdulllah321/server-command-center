@@ -916,4 +916,14 @@ export const downloadAndInstallUpdate = async (payload: InstallUpdatePayload): P
   });
 };
 
+export const openExternalUrl = async (url: string): Promise<void> => {
+  if (!url) return;
+  try {
+    await invoke('open_external_url', { url });
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+};
+
+
 

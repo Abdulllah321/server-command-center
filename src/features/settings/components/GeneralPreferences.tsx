@@ -23,6 +23,7 @@ import {
 import { useTheme } from 'next-themes';
 import { toast } from 'sonner';
 import { cn } from 'cn';
+import { openExternalUrl } from '@/lib/tauri-client';
 import { checkForUpdates, APP_VERSION, GITHUB_REPO, type UpdateCheckResult } from '@/lib/update-checker';
 
 export const GeneralPreferences = () => {
@@ -375,14 +376,13 @@ export const GeneralPreferences = () => {
                         Published on {new Date(updateResult.publishedAt).toLocaleDateString()}
                       </p>
                     </div>
-                    <a
-                      href={updateResult.htmlUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(updateResult.htmlUrl)}
+                      className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
                     >
                       Release Notes <ExternalLink className="w-3 h-3" />
-                    </a>
+                    </button>
                   </div>
 
                   {updateResult.releaseNotes && (
@@ -393,37 +393,34 @@ export const GeneralPreferences = () => {
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     {updateResult.exeInstallerUrl && (
-                      <a
-                        href={updateResult.exeInstallerUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs"
+                      <button
+                        type="button"
+                        onClick={() => openExternalUrl(updateResult.exeInstallerUrl!)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs cursor-pointer"
                       >
                         <DownloadCloud className="w-3.5 h-3.5" />
                         Download Desktop Setup (.exe)
-                      </a>
+                      </button>
                     )}
                     {updateResult.exePortableUrl && (
-                      <a
-                        href={updateResult.exePortableUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-colors"
+                      <button
+                        type="button"
+                        onClick={() => openExternalUrl(updateResult.exePortableUrl!)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-colors cursor-pointer"
                       >
                         <DownloadCloud className="w-3.5 h-3.5" />
                         Download Portable (.exe)
-                      </a>
+                      </button>
                     )}
                     {updateResult.apkUrl && (
-                      <a
-                        href={updateResult.apkUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                      <button
+                        type="button"
+                        onClick={() => openExternalUrl(updateResult.apkUrl!)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors cursor-pointer"
                       >
                         <Smartphone className="w-3.5 h-3.5" />
                         Download Mobile Package (.apk)
-                      </a>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -433,14 +430,13 @@ export const GeneralPreferences = () => {
                     <ShieldCheck className="w-4 h-4 shrink-0" />
                     <span>Your application is completely up to date (version {APP_VERSION}).</span>
                   </div>
-                  <a
-                    href={updateResult.htmlUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1"
+                  <button
+                    type="button"
+                    onClick={() => openExternalUrl(updateResult.htmlUrl)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer"
                   >
                     View Releases <ExternalLink className="w-3 h-3" />
-                  </a>
+                  </button>
                 </div>
               )}
             </div>

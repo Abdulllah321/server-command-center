@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.9';
+export const APP_VERSION = '1.2.0';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,26 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.0': {
+    summary: 'Native OS browser routing for all external links and release assets, eliminating broken WebView navigation and suppressing useless default browser context menus.',
+    highlights: [
+      'Native OS Browser Integration: All external links, release URLs, and download targets route directly to the user\'s default desktop browser via system shell association.',
+      'Suppressed WebView Context Menu: Eliminated useless default browser context menus ("Open link in new window", "Save link as") across desktop views while keeping terminal and text inputs fully functional.',
+      'Interactive Binary Asset Actions: 1-click update trigger for setup installers, direct browser download launcher, and 1-click copy download URL for all compiled binaries and SHA-256 checksums.',
+      'Context Menu Copy Action: Right-clicking any release binary automatically copies its secure download URL directly to the system clipboard.'
+    ],
+    features: [
+      'Interactive Asset Cards: Every release asset item provides direct 1-click update, in-browser download, and clipboard copy actions.',
+      'Desktop Link Routing: Global link interceptor ensures zero broken WebView2 windows when clicking any web link.'
+    ],
+    fixes: [
+      'Fixed non-functional clicking on release binaries, setup installers, and portable EXEs in the release timeline.',
+      'Eliminated useless browser context menus on right-clicking links and cards.'
+    ],
+    performance: [
+      'Zero overhead URL delegation directly using operating system shell process spawn.'
+    ]
+  },
   'v1.1.9': {
     summary: 'Resolved file upload chunk payload deserialization conflict, ensuring seamless large file (1 GB+) streaming uploads with zero server memory footprint.',
     highlights: [

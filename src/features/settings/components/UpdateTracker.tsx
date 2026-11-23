@@ -18,12 +18,13 @@ import {
   GitCommit,
   GitBranch,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from 'cn';
 import { listen } from '@tauri-apps/api/event';
-import { downloadAndInstallUpdate, type DownloadUpdateProgressPayload } from '@/lib/tauri-client';
+import { downloadAndInstallUpdate, openExternalUrl, type DownloadUpdateProgressPayload } from '@/lib/tauri-client';
 import { 
   checkForUpdates, 
   fetchReleaseHistory, 
@@ -240,7 +241,7 @@ export const UpdateTracker = () => {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Server Command Center • Powered by Falah Tech (<a href="https://falah-tech.com" target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">falah-tech.com</a>)
+                    Server Command Center • Powered by Falah Tech (<button type="button" onClick={() => openExternalUrl("https://falah-tech.com")} className="text-primary hover:underline font-medium inline">falah-tech.com</button>)
                   </p>
                 </div>
               </div>
@@ -258,8 +259,8 @@ export const UpdateTracker = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => window.open(`https://github.com/${GITHUB_REPO}/releases`, '_blank')}
-                className="text-xs h-9 border-border hover:bg-accent text-foreground"
+                onClick={() => openExternalUrl(`https://github.com/${GITHUB_REPO}/releases`)}
+                className="text-xs h-9 border-border hover:bg-accent text-foreground cursor-pointer"
               >
                 <ExternalLink className="w-3.5 h-3.5 mr-1.5 text-muted-foreground" />
                 View on GitHub
@@ -309,14 +310,13 @@ export const UpdateTracker = () => {
                     </p>
                   </div>
 
-                  <a
-                    href={updateResult.htmlUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium"
+                  <button
+                    type="button"
+                    onClick={() => openExternalUrl(updateResult.htmlUrl)}
+                    className="text-xs text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
                   >
                     View Full Release Notes <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                  </button>
                 </div>
 
                 {updateResult.releaseNotes && (
@@ -364,38 +364,35 @@ export const UpdateTracker = () => {
                   )}
 
                   {updateResult.exeInstallerUrl && (
-                    <a
-                      href={updateResult.exeInstallerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all"
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(updateResult.exeInstallerUrl!)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all cursor-pointer"
                     >
                       <DownloadCloud className="w-3.5 h-3.5" />
                       Download Setup Manually
-                    </a>
+                    </button>
                   )}
 
                   {updateResult.exePortableUrl && (
-                    <a
-                      href={updateResult.exePortableUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all"
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(updateResult.exePortableUrl!)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-border bg-card hover:bg-muted text-foreground transition-all cursor-pointer"
                     >
                       <DownloadCloud className="w-3.5 h-3.5" />
                       Portable EXE
-                    </a>
+                    </button>
                   )}
                   {updateResult.apkUrl && (
-                    <a
-                      href={updateResult.apkUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all"
+                    <button
+                      type="button"
+                      onClick={() => openExternalUrl(updateResult.apkUrl!)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-all cursor-pointer"
                     >
                       <Smartphone className="w-3.5 h-3.5" />
                       Download Android APK
-                    </a>
+                    </button>
                   )}
                 </div>
               </CardContent>
@@ -561,15 +558,14 @@ export const UpdateTracker = () => {
                           {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                         </Button>
 
-                        <a
-                          href={rel.htmlUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        <button
+                          type="button"
+                          onClick={() => openExternalUrl(rel.htmlUrl)}
+                          className="p-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                           title="Open release on GitHub"
                         >
                           <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                        </button>
                       </div>
                     </div>
 
@@ -681,31 +677,77 @@ export const UpdateTracker = () => {
                               Compiled Binaries & Checksums
                             </span>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              {rel.assets.map((asset, idx) => (
-                                <a
-                                  key={idx}
-                                  href={asset.downloadUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-2.5 rounded-lg border border-border bg-card/80 hover:border-primary/40 hover:bg-primary/5 transition-all flex items-center justify-between group"
-                                >
-                                  <div className="flex items-center gap-2 truncate pr-2">
-                                    <DownloadCloud className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                                    <div className="truncate text-left">
-                                      <p className="text-xs font-medium text-foreground truncate group-hover:text-primary transition-colors">
-                                        {asset.name}
-                                      </p>
-                                      <span className="text-[10px] text-muted-foreground font-mono">
-                                        {formatFileSize(asset.size)}
-                                      </span>
+                              {rel.assets.map((asset, idx) => {
+                                const isInstaller = asset.type === 'installer';
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      if (isInstaller && rel.isNewer) {
+                                        handleInstallUpdate(rel);
+                                      } else {
+                                        openExternalUrl(asset.downloadUrl);
+                                      }
+                                    }}
+                                    onContextMenu={(e) => {
+                                      e.preventDefault();
+                                      navigator.clipboard.writeText(asset.downloadUrl);
+                                      toast.success(`Copied download URL for ${asset.name}`);
+                                    }}
+                                    className="p-2.5 rounded-lg border border-border bg-card/80 hover:border-primary/40 hover:bg-primary/5 transition-all flex items-center justify-between group cursor-pointer"
+                                    title={isInstaller && rel.isNewer ? `Click to 1-Click Update to ${rel.tagName}` : `Click to download ${asset.name} (Right-click to copy link)`}
+                                  >
+                                    <div className="flex items-center gap-2 truncate pr-2">
+                                      <DownloadCloud className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
+                                      <div className="truncate text-left">
+                                        <p className="text-xs font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                                          {asset.name}
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] text-muted-foreground font-mono">
+                                            {formatFileSize(asset.size)}
+                                          </span>
+                                          {isInstaller && rel.isNewer && (
+                                            <span className="text-[10px] text-amber-500 font-semibold flex items-center gap-0.5">
+                                              <Sparkles className="w-3 h-3 inline" /> 1-Click Update
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          navigator.clipboard.writeText(asset.downloadUrl);
+                                          toast.success(`Copied download URL for ${asset.name}`);
+                                        }}
+                                        title="Copy download URL"
+                                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                      >
+                                        <Copy className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          openExternalUrl(asset.downloadUrl);
+                                        }}
+                                        title="Download in external browser"
+                                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </button>
+                                      {getAssetBadge(asset.type)}
                                     </div>
                                   </div>
-
-                                  <div className="shrink-0">
-                                    {getAssetBadge(asset.type)}
-                                  </div>
-                                </a>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}

@@ -141,3 +141,41 @@ pub async fn download_and_install_update(
     Ok(())
 }
 
+/// Opens an external HTTP/HTTPS URL in the user's default operating system browser
+#[tauri::command]
+pub async fn open_external_url(url: String) -> CommandResult<()> {
+    let trimmed = url.trim();
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") && !trimmed.starts_with("mailto:") {
+        return Err(CommandError::Validation("Invalid URL protocol. Only HTTP, HTTPS, and mailto URLs can be opened externally.".into()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "", trimmed])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| CommandError::Internal(format!("Failed to open external browser: {}", e)))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| CommandError::Internal(format!("Failed to open external browser: {}", e)))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(trimmed)
+            .spawn()
+            .map_err(|e| CommandError::Internal(format!("Failed to open external browser: {}", e)))?;
+    }
+
+    Ok(())
+}
+

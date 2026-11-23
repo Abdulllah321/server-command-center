@@ -198,6 +198,7 @@ pub fn run() {
         commands::files::change_remote_permissions,
         commands::files::search_remote_files,
         commands::updater::download_and_install_update,
+        commands::updater::open_external_url,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
