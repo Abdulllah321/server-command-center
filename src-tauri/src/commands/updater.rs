@@ -11,14 +11,42 @@ pub struct DownloadUpdateProgressPayload {
     pub percent: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize)]
 pub struct InstallUpdatePayload {
-    #[serde(alias = "download_url")]
     pub download_url: String,
     pub filename: String,
-    #[serde(default, alias = "total_bytes")]
     pub total_bytes: u64,
+}
+
+impl<'de> Deserialize<'de> for InstallUpdatePayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let val = serde_json::Value::deserialize(deserializer)?;
+
+        let download_url = val.get("downloadUrl")
+            .or_else(|| val.get("download_url"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let filename = val.get("filename")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let total_bytes = val.get("totalBytes")
+            .or_else(|| val.get("total_bytes"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        Ok(InstallUpdatePayload {
+            download_url,
+            filename,
+            total_bytes,
+        })
+    }
 }
 
 /// Downloads the release asset to %TEMP% with real-time progress, launches the installer, and restarts the app

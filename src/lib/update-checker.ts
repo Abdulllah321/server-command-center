@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.5';
+export const APP_VERSION = '1.1.7';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,43 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.7': {
+    summary: 'Resolved duplicate field deserialization conflict in updater engine, ensuring seamless 1-click in-app upgrades across all versions.',
+    highlights: [
+      'Eliminated `duplicate field downloadUrl` error by replacing Serde derive alias with immune custom Value deserializer.',
+      'Guaranteed backward and forward compatibility for all camelCase and snake_case updater payloads.',
+      'Smooth automated download and in-place upgrade workflow from the Releases & Changelog interface.'
+    ],
+    features: [
+      'Robust Updater Deserialization: Handles camelCase, snake_case, or mixed legacy keys without schema rejection.',
+      'Silent In-Place Upgrade: Seamlessly fetches installer to temp and launches cleanly.'
+    ],
+    fixes: [
+      'Fixed `invalid args payload for command download_and_install_update: duplicate field downloadUrl` error.'
+    ],
+    performance: [
+      'Zero serialization overhead when launching updater daemon.'
+    ]
+  },
+  'v1.1.6': {
+    summary: 'Browser-style multi-server workspace tabbing system (Edge / WPS style) with keep-alive background execution for terminals, rebuilds, and backups.',
+    highlights: [
+      'Multi-Server Tabs: Manage multiple servers simultaneously inside a single window with a native horizontal tab strip.',
+      'Keep-Alive Background Execution: Switching tabs keeps terminal `./rebuild.sh` runs, Next.js compilations, and backups running continuously without interruption.',
+      'Smart Tab Controls: Middle-click to close, right-click context menu, dynamic server names, and keyboard navigation (Ctrl+Tab, Ctrl+W, Ctrl+1..9).'
+    ],
+    features: [
+      'Native Workspace Tab Bar: Edge / WPS style tabs with status indicators, close buttons, and quick plus switcher.',
+      'Continuous Tab Viewport: Inactive tabs stay rendered in DOM (`display: none`), preserving SSH channels and xterm state.',
+      'Responsive Terminal Auto-Fit: Terminal automatically re-fits rows and columns upon switching back.'
+    ],
+    fixes: [
+      'Eliminated need to open multiple OS windows side-by-side to monitor simultaneous servers.'
+    ],
+    performance: [
+      'Instant zero-reload tab switching with preserved client-side and SSH state.'
+    ]
+  },
   'v1.1.5': {
     summary: 'In-app updater argument serialization fix, cross-version payload compatibility, and S3 SigV4 base64 signer.',
     highlights: [
