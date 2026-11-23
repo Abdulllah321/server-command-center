@@ -406,6 +406,8 @@ export interface CreateBackupScheduleOptions {
   retention_count?: number;
   cloud_provider?: 'none' | 's3' | 'dropbox';
   cloud_config_id?: string;
+  storage_provider?: string;
+  storage_config?: string;
   enabled?: boolean;
 }
 
@@ -443,23 +445,48 @@ export interface ScheduleRunResult {
 }
 
 export const listBackupSchedules = async (serverId: string): Promise<BackupSchedule[]> => {
-  return await invoke('list_backup_schedules', { serverId });
+  return await invoke('list_backup_schedules', { serverId, server_id: serverId });
 };
 
 export const createBackupSchedule = async (options: CreateBackupScheduleOptions): Promise<BackupSchedule> => {
-  return await invoke('create_backup_schedule', { options });
+  return await invoke('create_backup_schedule', { 
+    serverId: options.server_id,
+    server_id: options.server_id,
+    options: {
+      ...options,
+      storage_provider: options.storage_provider || options.cloud_provider,
+      storage_config: options.storage_config,
+    }
+  });
 };
 
-export const toggleBackupSchedule = async (scheduleId: string, enabled: boolean): Promise<BackupSchedule> => {
-  return await invoke('toggle_backup_schedule', { scheduleId, enabled });
+export const toggleBackupSchedule = async (scheduleId: string, enabled: boolean, serverId?: string): Promise<BackupSchedule> => {
+  return await invoke('toggle_backup_schedule', { 
+    scheduleId, 
+    schedule_id: scheduleId,
+    enable: enabled,
+    enabled,
+    serverId: serverId ?? null,
+    server_id: serverId ?? null,
+  });
 };
 
-export const deleteBackupSchedule = async (scheduleId: string): Promise<void> => {
-  return await invoke('delete_backup_schedule', { scheduleId });
+export const deleteBackupSchedule = async (scheduleId: string, serverId?: string): Promise<void> => {
+  return await invoke('delete_backup_schedule', { 
+    scheduleId, 
+    schedule_id: scheduleId,
+    serverId: serverId ?? null,
+    server_id: serverId ?? null,
+  });
 };
 
-export const runBackupScheduleNow = async (scheduleId: string): Promise<ScheduleRunResult> => {
-  return await invoke('run_backup_schedule_now', { scheduleId });
+export const runBackupScheduleNow = async (scheduleId: string, serverId?: string): Promise<ScheduleRunResult> => {
+  return await invoke('run_backup_schedule_now', { 
+    scheduleId, 
+    schedule_id: scheduleId,
+    serverId: serverId ?? null,
+    server_id: serverId ?? null,
+  });
 };
 
 export const testCloudStorageConnection = async (serverId: string, provider: 's3' | 'dropbox', configJson: string): Promise<TestCloudStorageResult> => {

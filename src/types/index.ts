@@ -235,6 +235,8 @@ export interface CreateBackupScheduleOptions {
   retention_count?: number;
   cloud_provider?: 'none' | 's3' | 'dropbox';
   cloud_config_id?: string;
+  storage_provider?: string;
+  storage_config?: string;
   enabled?: boolean;
 }
 

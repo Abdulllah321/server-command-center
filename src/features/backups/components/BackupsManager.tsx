@@ -368,7 +368,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const handleToggleSchedule = async (schedule: BackupSchedule) => {
     const newStatus = !schedule.enabled;
     try {
-      const updated = await toggleBackupSchedule(schedule.id, newStatus);
+      const updated = await toggleBackupSchedule(schedule.id, newStatus, serverId);
       toast.success(newStatus ? 'Schedule enabled in crontab' : 'Schedule paused in crontab');
       setSchedules(prev => prev.map(s => s.id === updated.id ? updated : s));
     } catch (err: any) {
@@ -380,7 +380,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
     if (!confirm(`Are you sure you want to remove cron schedule "${schedule.name}" from server?`)) return;
 
     try {
-      await deleteBackupSchedule(schedule.id);
+      await deleteBackupSchedule(schedule.id, serverId);
       toast.success('Schedule removed from server crontab');
       setSchedules(prev => prev.filter(s => s.id !== schedule.id));
     } catch (err: any) {
@@ -391,7 +391,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const handleRunScheduleNow = async (schedule: BackupSchedule) => {
     setRunningScheduleId(schedule.id);
     try {
-      const res = await runBackupScheduleNow(schedule.id);
+      const res = await runBackupScheduleNow(schedule.id, serverId);
       toast.success('Scheduled backup executed successfully!', {
         description: `Archive created: ${res.archive_file}`,
       });

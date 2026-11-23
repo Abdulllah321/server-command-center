@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.1.7';
+export const APP_VERSION = '1.1.8';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,26 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.1.8': {
+    summary: 'Resolved server ID argument mismatch in backup CRON schedule creation, toggle, delete, and manual run commands, with full cloud storage integration.',
+    highlights: [
+      'Eliminated `invalid args serverId for command create_backup_schedule: missing required key serverId` error.',
+      'Flexible Server ID Resolution: Accepts `serverId` at top level or extracts from `options.server_id` seamlessly.',
+      'Autonomous Cloud Upload Injection: Remote server crontabs directly read S3 / Dropbox configurations and upload generated archives automatically.',
+      'Robust Schedule Lifecycle: Hardened toggle, delete, and run-now commands to query by schedule ID even when serverId is omitted.'
+    ],
+    features: [
+      'Resilient Schedule Arguments: All backup schedule IPC commands support both camelCase and snake_case parameters.',
+      'Autonomous Server-Side Backup Daemon: Remote cron schedules execute independently on the target Linux servers.'
+    ],
+    fixes: [
+      'Fixed `invalid args serverId for command create_backup_schedule` error when saving new cron jobs.',
+      'Fixed schedule toggle and deletion when operating across multiple server tabs.'
+    ],
+    performance: [
+      'Zero round-trip overhead during schedule creation; uses pooled SSH session.'
+    ]
+  },
   'v1.1.7': {
     summary: 'Resolved duplicate field deserialization conflict in updater engine, ensuring seamless 1-click in-app upgrades across all versions.',
     highlights: [

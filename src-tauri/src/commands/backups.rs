@@ -759,6 +759,7 @@ pub struct BackupSchedule {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBackupScheduleOptions {
+    pub server_id: Option<String>,
     pub name: String,
     pub target_type: String,
     pub target_name: String,
@@ -772,6 +773,8 @@ pub struct CreateBackupScheduleOptions {
     pub custom_command: Option<String>,
     pub storage_provider: Option<String>,
     pub storage_config: Option<String>,
+    pub cloud_provider: Option<String>,
+    pub cloud_config_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1333,9 +1336,14 @@ fi
 pub async fn create_backup_schedule(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    server_id: String,
+    server_id: Option<String>,
     options: CreateBackupScheduleOptions,
 ) -> CommandResult<BackupSchedule> {
+    let target_server_id = server_id
+        .or_else(|| options.server_id.clone())
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| CommandError::Validation("Server ID is required to create backup schedule".into()))?;
+
     if options.name.trim().is_empty() {
         return Err(CommandError::Validation("Schedule name cannot be empty".into()));
     }
@@ -1351,6 +1359,23 @@ pub async fn create_backup_schedule(
         ));
     }
 
+    // Resolve storage provider and config (support cloud_config_id, storage_provider, cloud_provider)
+    let (resolved_provider, resolved_config_json) = if let Some(ref cid) = options.cloud_config_id.as_ref().filter(|c| !c.trim().is_empty()) {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT provider, config_json FROM cloud_storage_configs WHERE id = ?1")
+            .map_err(|e| CommandError::Database(e.to_string()))?;
+        let res = stmt.query_row(rusqlite::params![cid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| CommandError::Database(format!("Failed to load cloud storage config: {}", e)))?;
+        (res.0, Some(res.1))
+    } else {
+        (
+            options.storage_provider
+                .or(options.cloud_provider)
+                .unwrap_or_else(|| "none".into()),
+            options.storage_config,
+        )
+    };
+
     let schedule_id = Uuid::new_v4().to_string();
     let dest_dir = options.destination_dir.as_deref().unwrap_or("/var/backups");
     let retention = options.retention_count.unwrap_or(7);
@@ -1358,7 +1383,7 @@ pub async fn create_backup_schedule(
 
     // 1. Acquire pooled SSH session
     let session_arc = state.session_manager
-        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .get_or_connect(target_server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
@@ -1388,8 +1413,8 @@ fi
         options.db_host.as_deref(),
         options.db_port,
         options.custom_command.as_deref(),
-        options.storage_provider.as_deref().unwrap_or("none"),
-        options.storage_config.as_deref(),
+        &resolved_provider,
+        resolved_config_json.as_deref(),
         &script_dir,
     );
 
@@ -1440,7 +1465,7 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1, ?16, 'active', ?17, ?17)",
             rusqlite::params![
                 schedule_id,
-                server_id,
+                target_server_id,
                 options.name,
                 options.target_type,
                 options.target_name,
@@ -1452,15 +1477,15 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
                 options.db_host,
                 options.db_port,
                 options.custom_command,
-                options.storage_provider.unwrap_or_else(|| "none".into()),
-                options.storage_config,
+                resolved_provider,
+                resolved_config_json,
                 script_path,
                 now_iso
             ],
         ).map_err(|e| CommandError::Database(e.to_string()))?;
 
         log_activity(&conn, ActivityEntry {
-            server_id: Some(server_id.clone()),
+            server_id: Some(target_server_id.clone()),
             action: actions::CREATE_BACKUP_SCHEDULE.into(),
             target: Some(options.name.clone()),
             status: "success".into(),
@@ -1474,7 +1499,7 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
 
     Ok(BackupSchedule {
         id: schedule_id,
-        server_id,
+        server_id: target_server_id,
         name: options.name,
         target_type: options.target_type,
         target_name: options.target_name,
@@ -1486,8 +1511,8 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
         db_host: options.db_host,
         db_port: options.db_port,
         custom_command: options.custom_command,
-        storage_provider: "none".to_string(),
-        storage_config: None,
+        storage_provider: resolved_provider,
+        storage_config: resolved_config_json,
         is_active: true,
         remote_script_path: Some(script_path),
         last_run_at: None,
@@ -1501,16 +1526,18 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
 pub async fn toggle_backup_schedule(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    server_id: String,
+    server_id: Option<String>,
     schedule_id: String,
-    enable: bool,
+    enable: Option<bool>,
+    enabled: Option<bool>,
 ) -> CommandResult<BackupSchedule> {
+    let should_enable = enable.or(enabled).unwrap_or(true);
     let start_time = Instant::now();
 
     // 1. Fetch existing schedule from DB
     let sched = {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        let mut stmt = conn.prepare(
+        let sql = if server_id.is_some() {
             "SELECT id, server_id, name, target_type, target_name, cron_expression,
                     destination_dir, retention_count, db_user, db_password, db_host,
                     db_port, custom_command, storage_provider, storage_config,
@@ -1518,9 +1545,18 @@ pub async fn toggle_backup_schedule(
                     created_at, updated_at
              FROM backup_schedules
              WHERE id = ?1 AND server_id = ?2"
-        ).map_err(|e| CommandError::Database(e.to_string()))?;
+        } else {
+            "SELECT id, server_id, name, target_type, target_name, cron_expression,
+                    destination_dir, retention_count, db_user, db_password, db_host,
+                    db_port, custom_command, storage_provider, storage_config,
+                    is_active, remote_script_path, last_run_at, last_status,
+                    created_at, updated_at
+             FROM backup_schedules
+             WHERE id = ?1"
+        };
+        let mut stmt = conn.prepare(sql).map_err(|e| CommandError::Database(e.to_string()))?;
 
-        stmt.query_row([&schedule_id, &server_id], |r| {
+        let map_row = |r: &rusqlite::Row| {
             let active_int: i32 = r.get(15)?;
             Ok(BackupSchedule {
                 id: r.get(0)?,
@@ -1545,12 +1581,20 @@ pub async fn toggle_backup_schedule(
                 created_at: r.get(19)?,
                 updated_at: r.get(20)?,
             })
-        }).map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
+        };
+
+        if let Some(ref sid) = server_id {
+            stmt.query_row(rusqlite::params![&schedule_id, sid], map_row)
+        } else {
+            stmt.query_row(rusqlite::params![&schedule_id], map_row)
+        }.map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
     };
+
+    let target_server_id = sched.server_id.clone();
 
     // 2. Connect to server
     let session_arc = state.session_manager
-        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .get_or_connect(target_server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
@@ -1558,7 +1602,7 @@ pub async fn toggle_backup_schedule(
     let script_path = sched.remote_script_path.clone().unwrap_or_else(|| format!("/var/scripts/scc_backup_{}.sh", schedule_id));
     let log_path = format!("{}.log", script_path.trim_end_matches(".sh"));
 
-    if enable {
+    if should_enable {
         let install_cron_cmd = format!(
             r#"bash -c '
 EXISTING=$(crontab -l 2>/dev/null | grep -v "SCC_BACKUP_{id}" || true)
@@ -1594,18 +1638,18 @@ fi
     {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
         conn.execute(
-            "UPDATE backup_schedules SET is_active = ?1, updated_at = ?2 WHERE id = ?3 AND server_id = ?4",
-            rusqlite::params![if enable { 1 } else { 0 }, now_iso, schedule_id, server_id]
+            "UPDATE backup_schedules SET is_active = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![if should_enable { 1 } else { 0 }, now_iso, schedule_id]
         ).map_err(|e| CommandError::Database(e.to_string()))?;
 
         log_activity(&conn, ActivityEntry {
-            server_id: Some(server_id),
+            server_id: Some(target_server_id),
             action: actions::UPDATE_BACKUP_SCHEDULE.into(),
             target: Some(sched.name.clone()),
             status: "success".into(),
             detail: Some(format!(
                 "{} backup schedule (cron: '{}')",
-                if enable { "Enabled" } else { "Paused" },
+                if should_enable { "Enabled" } else { "Paused" },
                 sched.cron_expression
             )),
             duration_ms: Some(start_time.elapsed().as_millis() as i64),
@@ -1613,7 +1657,7 @@ fi
     }
 
     let mut updated = sched;
-    updated.is_active = enable;
+    updated.is_active = should_enable;
     updated.updated_at = now_iso;
     Ok(updated)
 }
@@ -1622,21 +1666,29 @@ fi
 pub async fn delete_backup_schedule(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    server_id: String,
+    server_id: Option<String>,
     schedule_id: String,
 ) -> CommandResult<()> {
     let start_time = Instant::now();
 
-    // 1. Fetch remote script path
-    let script_path: Option<String> = {
+    // 1. Fetch remote script path and target server_id
+    let (target_server_id, script_path) = {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT remote_script_path FROM backup_schedules WHERE id = ?1 AND server_id = ?2")
-            .map_err(|e| CommandError::Database(e.to_string()))?;
-        stmt.query_row([&schedule_id, &server_id], |r| r.get(0)).ok()
+        if let Some(ref sid) = server_id {
+            let mut stmt = conn.prepare("SELECT server_id, remote_script_path FROM backup_schedules WHERE id = ?1 AND server_id = ?2")
+                .map_err(|e| CommandError::Database(e.to_string()))?;
+            stmt.query_row(rusqlite::params![&schedule_id, sid], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+                .map_err(|e| CommandError::Database(format!("Schedule not found: {}", e)))?
+        } else {
+            let mut stmt = conn.prepare("SELECT server_id, remote_script_path FROM backup_schedules WHERE id = ?1")
+                .map_err(|e| CommandError::Database(e.to_string()))?;
+            stmt.query_row(rusqlite::params![&schedule_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
+                .map_err(|e| CommandError::Database(format!("Schedule not found: {}", e)))?
+        }
     };
 
     // 2. Remove from crontab and clean up remote script
-    if let Ok(session_arc) = state.session_manager.get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone()).await {
+    if let Ok(session_arc) = state.session_manager.get_or_connect(target_server_id.clone(), state.db.clone(), app_handle.clone()).await {
         let mut session = session_arc.lock().await;
         let script = script_path.unwrap_or_else(|| format!("/var/scripts/scc_backup_{}.sh", schedule_id));
         let log = format!("{}.log", script.trim_end_matches(".sh"));
@@ -1664,11 +1716,11 @@ rm -f "{script}" "{log}" "{status}"
     // 3. Remove from SQLite
     {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        conn.execute("DELETE FROM backup_schedules WHERE id = ?1 AND server_id = ?2", rusqlite::params![schedule_id, server_id])
+        conn.execute("DELETE FROM backup_schedules WHERE id = ?1", rusqlite::params![schedule_id])
             .map_err(|e| CommandError::Database(e.to_string()))?;
 
         log_activity(&conn, ActivityEntry {
-            server_id: Some(server_id),
+            server_id: Some(target_server_id),
             action: actions::DELETE_BACKUP_SCHEDULE.into(),
             target: Some(schedule_id),
             status: "success".into(),
@@ -1684,7 +1736,7 @@ rm -f "{script}" "{log}" "{status}"
 pub async fn run_backup_schedule_now(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    server_id: String,
+    server_id: Option<String>,
     schedule_id: String,
 ) -> CommandResult<ScheduleRunResult> {
     let start_time = Instant::now();
@@ -1692,7 +1744,7 @@ pub async fn run_backup_schedule_now(
     // 1. Fetch schedule
     let sched = {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        let mut stmt = conn.prepare(
+        let sql = if server_id.is_some() {
             "SELECT id, server_id, name, target_type, target_name, cron_expression,
                     destination_dir, retention_count, db_user, db_password, db_host,
                     db_port, custom_command, storage_provider, storage_config,
@@ -1700,9 +1752,18 @@ pub async fn run_backup_schedule_now(
                     created_at, updated_at
              FROM backup_schedules
              WHERE id = ?1 AND server_id = ?2"
-        ).map_err(|e| CommandError::Database(e.to_string()))?;
+        } else {
+            "SELECT id, server_id, name, target_type, target_name, cron_expression,
+                    destination_dir, retention_count, db_user, db_password, db_host,
+                    db_port, custom_command, storage_provider, storage_config,
+                    is_active, remote_script_path, last_run_at, last_status,
+                    created_at, updated_at
+             FROM backup_schedules
+             WHERE id = ?1"
+        };
+        let mut stmt = conn.prepare(sql).map_err(|e| CommandError::Database(e.to_string()))?;
 
-        stmt.query_row([&schedule_id, &server_id], |r| {
+        let map_row = |r: &rusqlite::Row| {
             let active_int: i32 = r.get(15)?;
             Ok(BackupSchedule {
                 id: r.get(0)?,
@@ -1727,14 +1788,21 @@ pub async fn run_backup_schedule_now(
                 created_at: r.get(19)?,
                 updated_at: r.get(20)?,
             })
-        }).map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
+        };
+
+        if let Some(ref sid) = server_id {
+            stmt.query_row(rusqlite::params![&schedule_id, sid], map_row)
+        } else {
+            stmt.query_row(rusqlite::params![&schedule_id], map_row)
+        }.map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
     };
 
+    let target_server_id = sched.server_id.clone();
     let script_path = sched.remote_script_path.unwrap_or_else(|| format!("/var/scripts/scc_backup_{}.sh", schedule_id));
 
     // 2. Connect via SSH
     let session_arc = state.session_manager
-        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .get_or_connect(target_server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
@@ -1760,13 +1828,13 @@ pub async fn run_backup_schedule_now(
                     let _ = conn.execute(
                         "INSERT INTO backups (id, server_id, target, destination, size_bytes, status, created_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, 'success', ?6)",
-                        rusqlite::params![backup_id, server_id, sched.target_name, dest_file, size, now_iso]
+                        rusqlite::params![backup_id, target_server_id, sched.target_name, dest_file, size, now_iso]
                     );
                 }
 
                 created_backup_record = Some(BackupRecord {
                     id: backup_id,
-                    server_id: server_id.clone(),
+                    server_id: target_server_id.clone(),
                     target: sched.target_name.clone(),
                     destination: dest_file.to_string(),
                     size_bytes: size,
@@ -1781,12 +1849,12 @@ pub async fn run_backup_schedule_now(
     {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
         let _ = conn.execute(
-            "UPDATE backup_schedules SET last_run_at = ?1, last_status = ?2, updated_at = ?1 WHERE id = ?3 AND server_id = ?4",
-            rusqlite::params![now_iso, status_label, schedule_id, server_id]
+            "UPDATE backup_schedules SET last_run_at = ?1, last_status = ?2, updated_at = ?1 WHERE id = ?3",
+            rusqlite::params![now_iso, status_label, schedule_id]
         );
 
         log_activity(&conn, ActivityEntry {
-            server_id: Some(server_id),
+            server_id: Some(target_server_id),
             action: actions::RUN_BACKUP_SCHEDULE.into(),
             target: Some(sched.name),
             status: status_label.into(),
