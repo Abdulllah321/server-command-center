@@ -199,6 +199,11 @@ pub fn run() {
         commands::files::delete_remote_paths,
         commands::files::change_remote_permissions,
         commands::files::search_remote_files,
+        commands::files::move_remote_paths,
+        commands::files::copy_remote_paths,
+        commands::files::duplicate_remote_path,
+        commands::files::compress_remote_paths,
+        commands::files::extract_remote_archive,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])

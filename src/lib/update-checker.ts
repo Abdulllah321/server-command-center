@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.3';
+export const APP_VERSION = '1.2.4';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,21 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.4': {
+    summary: 'Full desktop-class remote SFTP File Explorer: move, cut-copy-paste, duplicate in place, compress, archive extraction, native drag-and-drop, and custom context menu.',
+    highlights: [
+      'Remote Cut, Copy & Paste: Move and copy files and subfolders across directories via keyboard shortcuts (Ctrl+X, Ctrl+C, Ctrl+V) or context menu with visual dimming for cut items.',
+      'One-Click In-Place Duplication: Instantly duplicate files or directories (Ctrl+D) with automatic non-conflicting naming (e.g. file_copy.ext).',
+      'Archive Compression & Extraction: Compress selected items to .zip or .tar.gz, and extract archives directly on the remote server with "Extract Here" or "Extract to Folder".',
+      'Seamless Drag-and-Drop: Drag remote files or folders onto directory rows to move them instantly; drag desktop files into the explorer to upload.',
+      'Custom Desktop Context Menu: Right-click on files, folders, or empty table canvas for instant access to open, edit, cut, copy, duplicate, chmod, compress, extract, download, and delete actions.',
+      'Fixed Table Layout: Resolved table header column collisions and overlap glitch for crisp presentation across all screen sizes.'
+    ],
+    features: [
+      'Native SFTP Commands: `move_remote_paths`, `copy_remote_paths`, `duplicate_remote_path`, `compress_remote_paths`, and `extract_remote_archive` over pooled SSH sessions.',
+      'Visual Clipboard State: Floating banner and dimmed rows provide real-time clipboard feedback with instant paste and cancellation.'
+    ]
+  },
   'v1.2.3': {
     summary: 'Cloud sync tracking, offsite cloud replica inspection ("See Cloud"), direct cloud downloads, and duplicate upload prevention.',
     highlights: [

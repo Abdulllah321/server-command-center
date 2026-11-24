@@ -1169,3 +1169,381 @@ fi
     Ok(Vec::new())
 }
 
+/// Moves remote files or directories into a target directory (Cut & Paste / Move)
+#[tauri::command]
+pub async fn move_remote_paths(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    source_paths: Vec<String>,
+    destination_dir: String,
+) -> CommandResult<()> {
+    if server_id.is_empty() || source_paths.is_empty() || destination_dir.is_empty() {
+        return Err(CommandError::Validation("Server ID, source paths, and destination directory required".into()));
+    }
+
+    // Safety checks against moving root system directories
+    let forbidden_roots = ["/", "/etc", "/bin", "/boot", "/dev", "/lib", "/lib64", "/proc", "/sys", "/usr", "/root"];
+    for p in &source_paths {
+        let clean = p.trim().trim_end_matches('/');
+        if forbidden_roots.contains(&clean) {
+            return Err(CommandError::Forbidden(format!("Refusing to move critical system path: {}", p)));
+        }
+    }
+
+    let start = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let dest_clean = destination_dir.replace('"', "\\\"");
+    let mut src_escaped = Vec::new();
+    for p in &source_paths {
+        src_escaped.push(format!("\"{}\"", p.replace('"', "\\\"")));
+    }
+
+    let script = format!(
+        r#"
+DEST="{}"
+mkdir -p "$DEST" 2>/dev/null || true
+if mv -t "$DEST" {} 2>/dev/null; then
+    exit 0
+else
+    for src in {}; do
+        mv "$src" "$DEST/"
+    done
+fi
+"#,
+        dest_clean,
+        src_escaped.join(" "),
+        src_escaped.join(" ")
+    );
+
+    let output = exec_ssh_command(&mut session, &script).await;
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::MOVE_REMOTE_PATH.into(),
+            target: Some(format!("{} -> {}", source_paths.join(", "), destination_dir)),
+            status: if output.is_ok() { "success".into() } else { "failed".into() },
+            detail: output.as_ref().err().map(|e| e.to_string()),
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+    }
+
+    output.map(|_| ())
+}
+
+/// Recursively copies remote files or directories into a target directory (Copy & Paste)
+#[tauri::command]
+pub async fn copy_remote_paths(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    source_paths: Vec<String>,
+    destination_dir: String,
+) -> CommandResult<()> {
+    if server_id.is_empty() || source_paths.is_empty() || destination_dir.is_empty() {
+        return Err(CommandError::Validation("Server ID, source paths, and destination directory required".into()));
+    }
+
+    let start = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let dest_clean = destination_dir.replace('"', "\\\"");
+    let mut src_escaped = Vec::new();
+    for p in &source_paths {
+        src_escaped.push(format!("\"{}\"", p.replace('"', "\\\"")));
+    }
+
+    let script = format!(
+        r#"
+DEST="{}"
+mkdir -p "$DEST" 2>/dev/null || true
+if cp -r -t "$DEST" {} 2>/dev/null; then
+    exit 0
+else
+    for src in {}; do
+        cp -r "$src" "$DEST/"
+    done
+fi
+"#,
+        dest_clean,
+        src_escaped.join(" "),
+        src_escaped.join(" ")
+    );
+
+    let output = exec_ssh_command(&mut session, &script).await;
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::COPY_REMOTE_PATH.into(),
+            target: Some(format!("{} -> {}", source_paths.join(", "), destination_dir)),
+            status: if output.is_ok() { "success".into() } else { "failed".into() },
+            detail: output.as_ref().err().map(|e| e.to_string()),
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+    }
+
+    output.map(|_| ())
+}
+
+/// Creates a duplicate copy of a remote file or directory in place
+#[tauri::command]
+pub async fn duplicate_remote_path(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    source_path: String,
+) -> CommandResult<String> {
+    if server_id.is_empty() || source_path.is_empty() {
+        return Err(CommandError::Validation("Server ID and source path required".into()));
+    }
+
+    let start = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let src_clean = source_path.replace('"', "\\\"");
+    let script = format!(
+        r#"
+P="{}"
+if [ ! -e "$P" ]; then
+    echo "ERROR: Source path does not exist" >&2
+    exit 1
+fi
+
+DIR=$(dirname "$P")
+BASE=$(basename "$P")
+
+if [ -d "$P" ]; then
+    C=1
+    NEW_PATH="$DIR/${{BASE}}_copy"
+    while [ -e "$NEW_PATH" ]; do
+        C=$((C+1))
+        NEW_PATH="$DIR/${{BASE}}_copy_$C"
+    done
+    cp -r "$P" "$NEW_PATH" && echo "$NEW_PATH"
+else
+    EXT="${{BASE##*.}}"
+    NAME="${{BASE%.*}}"
+    if [ "$EXT" = "$BASE" ] || [ -z "$EXT" ]; then
+        C=1
+        NEW_PATH="$DIR/${{BASE}}_copy"
+        while [ -e "$NEW_PATH" ]; do
+            C=$((C+1))
+            NEW_PATH="$DIR/${{BASE}}_copy_$C"
+        done
+    else
+        C=1
+        NEW_PATH="$DIR/${{NAME}}_copy.$EXT"
+        while [ -e "$NEW_PATH" ]; do
+            C=$((C+1))
+            NEW_PATH="$DIR/${{NAME}}_copy_${{C}}.$EXT"
+        done
+    fi
+    cp -r "$P" "$NEW_PATH" && echo "$NEW_PATH"
+fi
+"#,
+        src_clean
+    );
+
+    let output = exec_ssh_command(&mut session, &script).await?;
+    let new_path = output.trim().lines().last().unwrap_or("").trim().to_string();
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::DUPLICATE_REMOTE_PATH.into(),
+            target: Some(format!("{} -> {}", source_path, new_path)),
+            status: "success".into(),
+            detail: None,
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+    }
+
+    Ok(new_path)
+}
+
+/// Compresses selected remote files or directories into a target archive (.zip or .tar.gz)
+#[tauri::command]
+pub async fn compress_remote_paths(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    source_paths: Vec<String>,
+    destination_path: String,
+    archive_type: String,
+) -> CommandResult<()> {
+    if server_id.is_empty() || source_paths.is_empty() || destination_path.is_empty() {
+        return Err(CommandError::Validation("Server ID, sources, and destination archive required".into()));
+    }
+
+    let start = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let dest_clean = destination_path.replace('"', "\\\"");
+    let mut src_escaped = Vec::new();
+    for p in &source_paths {
+        src_escaped.push(format!("\"{}\"", p.replace('"', "\\\"")));
+    }
+
+    let is_zip = archive_type.eq_ignore_ascii_case("zip") || destination_path.ends_with(".zip");
+
+    let script = if is_zip {
+        format!(
+            r#"
+DEST="{}"
+DESTDIR=$(dirname "$DEST")
+mkdir -p "$DESTDIR" 2>/dev/null || true
+
+if command -v zip >/dev/null 2>&1; then
+    zip -r -q "$DEST" {}
+elif command -v python3 >/dev/null 2>&1; then
+    python3 -c '
+import zipfile, os, sys
+dest = sys.argv[1]
+sources = sys.argv[2:]
+with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
+    for src in sources:
+        if os.path.isdir(src):
+            base_dir = os.path.dirname(os.path.abspath(src))
+            for root, dirs, files in os.walk(src):
+                for f in files:
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, base_dir)
+                    zf.write(full, rel)
+        elif os.path.isfile(src):
+            zf.write(src, os.path.basename(src))
+' "$DEST" {}
+else
+    tar -czf "$DEST.tar.gz" {}
+fi
+"#,
+            dest_clean,
+            src_escaped.join(" "),
+            src_escaped.join(" "),
+            src_escaped.join(" ")
+        )
+    } else {
+        format!(
+            r#"
+DEST="{}"
+DESTDIR=$(dirname "$DEST")
+mkdir -p "$DESTDIR" 2>/dev/null || true
+tar -czf "$DEST" {}
+"#,
+            dest_clean,
+            src_escaped.join(" ")
+        )
+    };
+
+    let output = exec_ssh_command(&mut session, &script).await;
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::COMPRESS_REMOTE_PATH.into(),
+            target: Some(format!("{} -> {}", source_paths.join(", "), destination_path)),
+            status: if output.is_ok() { "success".into() } else { "failed".into() },
+            detail: output.as_ref().err().map(|e| e.to_string()),
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+    }
+
+    output.map(|_| ())
+}
+
+/// Extracts an archive (.zip, .tar.gz, .tgz, .tar.bz2, .tar.xz, .tar) into a destination directory
+#[tauri::command]
+pub async fn extract_remote_archive(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    archive_path: String,
+    destination_dir: String,
+) -> CommandResult<()> {
+    if server_id.is_empty() || archive_path.is_empty() || destination_dir.is_empty() {
+        return Err(CommandError::Validation("Server ID, archive path, and destination directory required".into()));
+    }
+
+    let start = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let archive_clean = archive_path.replace('"', "\\\"");
+    let dest_clean = destination_dir.replace('"', "\\\"");
+
+    let script = format!(
+        r#"
+ARCHIVE="{}"
+DEST="{}"
+mkdir -p "$DEST" 2>/dev/null || true
+
+case "$ARCHIVE" in
+    *.tar.gz|*.tgz)
+        tar -xzf "$ARCHIVE" -C "$DEST"
+        ;;
+    *.tar.bz2|*.tbz2)
+        tar -xjf "$ARCHIVE" -C "$DEST"
+        ;;
+    *.tar.xz|*.txz)
+        tar -xJf "$ARCHIVE" -C "$DEST"
+        ;;
+    *.tar)
+        tar -xf "$ARCHIVE" -C "$DEST"
+        ;;
+    *.zip)
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -q -o "$ARCHIVE" -d "$DEST"
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -c '
+import zipfile, sys
+zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])
+' "$ARCHIVE" "$DEST"
+        else
+            echo "Neither unzip nor python3 found" >&2
+            exit 1
+        fi
+        ;;
+    *.gz)
+        gunzip -c "$ARCHIVE" > "$DEST/$(basename "$ARCHIVE" .gz)"
+        ;;
+    *)
+        tar -xf "$ARCHIVE" -C "$DEST" 2>/dev/null || unzip -q -o "$ARCHIVE" -d "$DEST"
+        ;;
+esac
+"#,
+        archive_clean,
+        dest_clean
+    );
+
+    let output = exec_ssh_command(&mut session, &script).await;
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::EXTRACT_REMOTE_PATH.into(),
+            target: Some(format!("{} -> {}", archive_path, destination_dir)),
+            status: if output.is_ok() { "success".into() } else { "failed".into() },
+            detail: output.as_ref().err().map(|e| e.to_string()),
+            duration_ms: Some(start.elapsed().as_millis() as i64),
+        });
+    }
+
+    output.map(|_| ())
+}
+

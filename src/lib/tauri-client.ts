@@ -935,6 +935,26 @@ export const searchRemoteFiles = async (serverId: string, path: string, query: s
   return await invoke('search_remote_files', { serverId, path, query });
 };
 
+export const moveRemotePaths = async (serverId: string, sourcePaths: string[], destinationDir: string): Promise<void> => {
+  return await invoke('move_remote_paths', { serverId, sourcePaths, destinationDir });
+};
+
+export const copyRemotePaths = async (serverId: string, sourcePaths: string[], destinationDir: string): Promise<void> => {
+  return await invoke('copy_remote_paths', { serverId, sourcePaths, destinationDir });
+};
+
+export const duplicateRemotePath = async (serverId: string, sourcePath: string): Promise<string> => {
+  return await invoke('duplicate_remote_path', { serverId, sourcePath });
+};
+
+export const compressRemotePaths = async (serverId: string, sourcePaths: string[], destinationPath: string, archiveType: string = 'zip'): Promise<void> => {
+  return await invoke('compress_remote_paths', { serverId, sourcePaths, destinationPath, archiveType });
+};
+
+export const extractRemoteArchive = async (serverId: string, archivePath: string, destinationDir: string): Promise<void> => {
+  return await invoke('extract_remote_archive', { serverId, archivePath, destinationDir });
+};
+
 export interface InstallUpdatePayload {
   downloadUrl: string;
   filename: string;

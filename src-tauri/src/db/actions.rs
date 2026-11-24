@@ -60,4 +60,9 @@ pub const DELETE_REMOTE_PATH: &str = "delete_remote_path";
 pub const UPLOAD_REMOTE_FILE: &str = "upload_remote_file";
 pub const DOWNLOAD_REMOTE_FILE: &str = "download_remote_file";
 pub const CHMOD_REMOTE_PATH: &str = "chmod_remote_path";
+pub const MOVE_REMOTE_PATH: &str = "move_remote_path";
+pub const COPY_REMOTE_PATH: &str = "copy_remote_path";
+pub const DUPLICATE_REMOTE_PATH: &str = "duplicate_remote_path";
+pub const COMPRESS_REMOTE_PATH: &str = "compress_remote_path";
+pub const EXTRACT_REMOTE_PATH: &str = "extract_remote_path";
 
