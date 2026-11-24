@@ -492,3 +492,4 @@ export const HistoricalMetricsCharts: React.FC<HistoricalMetricsChartsProps> = (
     </div>
   );
 };
+

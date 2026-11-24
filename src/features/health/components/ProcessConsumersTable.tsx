@@ -576,3 +576,4 @@ export const ProcessConsumersTable: React.FC<ProcessConsumersTableProps> = ({
     </div>
   );
 };
+

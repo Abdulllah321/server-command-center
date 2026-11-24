@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.9';
+export const APP_VERSION = '1.3.0';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,22 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.0': {
+    summary: 'SSL Certificate Expiry Watchdog & Renewal Cockpit: Universal multi-domain discovery (Certbot + direct OpenSSL Nginx config parsing), color-coded expiration countdown badges, 1-click Let\'s Encrypt certificate issuance with dry-run verification, systemd auto-renewal timer toggle, and proactive expiration alert banners.',
+    highlights: [
+      'Universal Certificate Discovery: Exhaustively inspects both Certbot managed certificates and custom/manual/Cloudflare Origin CA certificates by scanning Nginx site configurations (`grep -rohP ssl_certificate`) and parsing with OpenSSL X509.',
+      'Proactive Expiry Watchdog: Instant color-coded urgency badges (>30d healthy green, 15-30d warning amber, <15d critical orange, ≤0d expired red) with days-until-expiry countdowns.',
+      'Server Overview Expiry Alert Banner: High-visibility urgency alert banner displayed right on the server overview if any certificate is expiring within 30 days or already expired, with 1-click cockpit jump.',
+      '1-Click Free Let\'s Encrypt Issuance: Issue production or staging test certificates (`certbot --nginx -d ...`) with optional HTTP-to-HTTPS redirect enforcement directly from the UI.',
+      'Dry-Run Verification & Real Renewal: Test certificate renewal integrity safely with Certbot dry-run mode before executing real renewals, with live captured command output reports.',
+      'Automated Timer Management: 1-click toggle for systemd `certbot.timer` auto-renewal background service directly from the cockpit status deck.',
+      'Safe Certificate Deletion: Destructive certificate removal protected behind short-lived single-use confirmation tokens and recorded in the audit log.'
+    ],
+    features: [
+      'Backend Commands: `get_ssl_overview`, `renew_ssl_certificates`, `issue_ssl_certificate`, `toggle_ssl_auto_renewal`, and `delete_ssl_certificate` over pooled SSH.',
+      'Security Audit Log: Every issuance, renewal, timer toggle, and deletion is recorded in the SQLite Activity Log.'
+    ]
+  },
   'v1.2.9': {
     summary: 'Historical Metrics & Process Top Consumers: Local persistent SQLite metrics history (1h, 24h, 7d) for CPU, RAM, Disk, and Load averages with interactive SVG charts, alongside a real-time Top Process Consumers deck with sort, filter, and 1-click token-gated termination.',
     highlights: [

@@ -12,3 +12,4 @@ CREATE TABLE IF NOT EXISTS server_metrics_history (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_server_recorded 
 ON server_metrics_history(server_id, recorded_at);
+

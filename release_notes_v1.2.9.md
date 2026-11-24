@@ -48,3 +48,4 @@ Server Command Center **v1.2.9** introduces comprehensive system telemetry persi
 | **Linux** | `server-command-center_1.2.9_amd64.deb` / `.AppImage` | Debian / Ubuntu & Standalone AppImage |
 
 *Server Command Center by Falah Tech — Professional Desktop Infrastructure Command.*
+

@@ -377,3 +377,4 @@ pub async fn kill_server_process(
         Err(CommandError::Internal(msg))
     }
 }
+

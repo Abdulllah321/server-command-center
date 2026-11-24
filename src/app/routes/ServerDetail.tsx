@@ -50,6 +50,7 @@ import { DatabaseManager } from '@/features/databases/components/DatabaseManager
 import { CronManager } from '@/features/cron/components/CronManager';
 import { HistoricalMetricsCharts } from '@/features/health/components/HistoricalMetricsCharts';
 import { ProcessConsumersTable } from '@/features/health/components/ProcessConsumersTable';
+import { SslExpiryWatchdogAlert } from '@/features/nginx/components/SslExpiryWatchdogAlert';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -401,6 +402,12 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
               onRefreshHealth={() => queryClient.invalidateQueries({ queryKey: ['health', id] })}
             />
           )}
+
+          {/* SSL Certificate Expiry Watchdog Alert Banner */}
+          <SslExpiryWatchdogAlert 
+            serverId={id} 
+            onNavigateToSsl={() => setActiveTab('nginx')} 
+          />
 
           {/* Quick Cockpit Action Strip (PM2 Bulk + Fast Rebuild) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

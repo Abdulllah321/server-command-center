@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -612,14 +612,6 @@ export interface NginxSite {
   file_path: string;
 }
 
-export interface SslCertificate {
-  domain: string;
-  cert_name: string;
-  expiry_date: string | null;
-  days_remaining: number | null;
-  is_valid: boolean;
-}
-
 export const listNginxSites = async (serverId: string): Promise<NginxSite[]> => {
   return await invoke('list_nginx_sites', { serverId });
 };
@@ -648,14 +640,53 @@ export const getSslCertificates = async (serverId: string): Promise<SslCertifica
   return await invoke('get_ssl_certificates', { serverId });
 };
 
+export const getSslOverview = async (serverId: string): Promise<SslOverview> => {
+  return await invoke('get_ssl_overview', { serverId });
+};
+
 export interface CertRenewalResult {
   success: boolean;
   output: string;
 }
 
-export const renewSslCertificates = async (serverId: string, dryRun: boolean): Promise<CertRenewalResult> => {
-  return await invoke('renew_ssl_certificates', { serverId, dryRun });
+export const renewSslCertificates = async (
+  serverId: string,
+  dryRun: boolean,
+  certName?: string
+): Promise<CertRenewalResult> => {
+  return await invoke('renew_ssl_certificates', {
+    serverId,
+    dryRun,
+    certName: certName || null,
+  });
 };
+
+export const issueSslCertificate = async (
+  serverId: string,
+  payload: IssueCertPayload
+): Promise<CertRenewalResult> => {
+  return await invoke('issue_ssl_certificate', { serverId, payload });
+};
+
+export const toggleSslAutoRenewal = async (
+  serverId: string,
+  enable: boolean
+): Promise<boolean> => {
+  return await invoke('toggle_ssl_auto_renewal', { serverId, enable });
+};
+
+export const deleteSslCertificate = async (
+  serverId: string,
+  certName: string,
+  confirmationToken?: string
+): Promise<string> => {
+  return await invoke('delete_ssl_certificate', {
+    serverId,
+    certName,
+    confirmationToken: confirmationToken || null,
+  });
+};
+
 
 // Security Audit & Port Scanner
 export interface ListeningPort {

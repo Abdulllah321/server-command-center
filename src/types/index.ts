@@ -305,7 +305,26 @@ export interface SslCertificate {
   expiry_date: string | null;
   days_remaining: number | null;
   is_valid: boolean;
+  issuer?: string | null;
+  cert_path?: string | null;
+  status_level: 'healthy' | 'expiring_soon' | 'critical' | 'expired';
 }
+
+export interface SslOverview {
+  certificates: SslCertificate[];
+  total_certs: number;
+  healthy_count: number;
+  expiring_soon_count: number;
+  expired_count: number;
+  is_auto_renew_timer_active: boolean;
+}
+
+export interface IssueCertPayload {
+  domain: string;
+  email: string;
+  staging_test: boolean;
+}
+
 
 export interface AlertRule {
   id: string;

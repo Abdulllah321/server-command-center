@@ -77,4 +77,8 @@ pub const DELETE_CRON_JOB: &str = "delete_cron_job";
 pub const TOGGLE_CRON_JOB: &str = "toggle_cron_job";
 pub const RUN_CRON_JOB_NOW: &str = "run_cron_job_now";
 pub const KILL_PROCESS: &str = "kill_process";
+pub const ISSUE_SSL_CERTIFICATE: &str = "issue_ssl_certificate";
+pub const RENEW_SSL_CERTIFICATES: &str = "renew_ssl_certificates";
+pub const DELETE_SSL_CERTIFICATE: &str = "delete_ssl_certificate";
+pub const TOGGLE_SSL_AUTO_RENEWAL: &str = "toggle_ssl_auto_renewal";
 

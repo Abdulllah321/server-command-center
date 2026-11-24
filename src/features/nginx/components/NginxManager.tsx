@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
@@ -11,10 +11,7 @@ import {
   toggleNginxSite, 
   testNginxConfig, 
   reloadNginx, 
-  getSslCertificates, 
-  renewSslCertificates,
-  type NginxSite, 
-  type SslCertificate 
+  type NginxSite
 } from '@/lib/tauri-client';
 import { 
   Globe, 
@@ -24,13 +21,11 @@ import {
   CheckCircle2, 
   Play, 
   Loader2, 
-  Save, 
-  Clock, 
-  AlertTriangle, 
-  Sparkles,
-  ShieldAlert
+  Save
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+import { SslCockpit } from './SslCockpit';
 
 interface NginxManagerProps {
   serverId: string;
@@ -39,7 +34,6 @@ interface NginxManagerProps {
 export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
   const [activeTab, setActiveTab] = useState<'sites' | 'ssl'>('sites');
   const [sites, setSites] = useState<NginxSite[]>([]);
-  const [certs, setCerts] = useState<SslCertificate[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -53,20 +47,11 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testOutput, setTestOutput] = useState('');
 
-  // SSL Renewal Modal
-  const [renewalModalOpen, setRenewalModalOpen] = useState(false);
-  const [renewalOutput, setRenewalOutput] = useState('');
-  const [renewalSuccess, setRenewalSuccess] = useState(true);
-
   const loadData = async () => {
     setLoading(true);
     try {
-      const [sitesData, certsData] = await Promise.all([
-        listNginxSites(serverId),
-        getSslCertificates(serverId).catch(() => []),
-      ]);
+      const sitesData = await listNginxSites(serverId);
       setSites(sitesData);
-      setCerts(certsData);
     } catch (err: any) {
       toast.error('Failed to load Nginx sites', { description: err.message || String(err) });
     } finally {
@@ -139,32 +124,6 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
     }
   };
 
-  const handleRenewCertificates = async (dryRun: boolean) => {
-    setActionLoading(true);
-    try {
-      const res = await renewSslCertificates(serverId, dryRun);
-      setRenewalSuccess(res.success);
-      setRenewalOutput(res.output);
-      setRenewalModalOpen(true);
-      if (res.success) {
-        toast.success(dryRun ? 'Dry run completed successfully' : 'Certificates renewed successfully');
-        loadData();
-      } else {
-        toast.error('Certbot renewal encountered warnings or errors');
-      }
-    } catch (err: any) {
-      setRenewalSuccess(false);
-      setRenewalOutput(err.message || String(err));
-      setRenewalModalOpen(true);
-      toast.error('Failed to execute certbot renewal');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const expiringSoonCount = certs.filter(c => c.days_remaining !== null && c.days_remaining <= 30 && c.days_remaining > 0).length;
-  const expiredCount = certs.filter(c => !c.is_valid || (c.days_remaining !== null && c.days_remaining <= 0)).length;
-
   return (
     <div className="space-y-6">
       {/* Top Header & Navigation Strip */}
@@ -185,7 +144,7 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {activeTab === 'sites' ? (
+          {activeTab === 'sites' && (
             <>
               <Button variant="outline" size="sm" onClick={handleTestSyntax} disabled={actionLoading || loading}>
                 <CheckCircle2 className="h-4 w-4 mr-1.5 text-emerald-500" />
@@ -195,34 +154,11 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
                 <Play className="h-4 w-4 mr-1.5 text-primary" />
                 Reload Nginx
               </Button>
-            </>
-          ) : (
-            <>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => handleRenewCertificates(true)} 
-                disabled={actionLoading || loading}
-                className="text-xs"
-              >
-                <Sparkles className="h-3.5 w-3.5 mr-1.5 text-sky-400" />
-                Dry Run Test
-              </Button>
-              <Button 
-                size="sm" 
-                onClick={() => handleRenewCertificates(false)} 
-                disabled={actionLoading || loading}
-                className="text-xs bg-primary text-primary-foreground font-semibold"
-              >
-                {actionLoading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />}
-                Renew All Now
+              <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               </Button>
             </>
           )}
-
-          <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </Button>
         </div>
       </div>
 
@@ -251,17 +187,7 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
           }`}
         >
           <ShieldCheck className="w-3.5 h-3.5" />
-          <span>SSL Watchdog ({certs.length})</span>
-          {expiringSoonCount > 0 && (
-            <span className="ml-1 px-1.5 py-0.2 bg-amber-500/20 text-amber-500 rounded-full text-[10px] font-bold">
-              {expiringSoonCount} expiring
-            </span>
-          )}
-          {expiredCount > 0 && (
-            <span className="ml-1 px-1.5 py-0.2 bg-rose-500/20 text-rose-500 rounded-full text-[10px] font-bold">
-              {expiredCount} expired
-            </span>
-          )}
+          <span>SSL Watchdog & Certificates</span>
         </button>
       </div>
 
@@ -344,152 +270,11 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
         </div>
       )}
 
-      {/* Tab View 2: SSL Certificate Watchdog */}
+      {/* Tab View 2: SSL Certificate Expiry Watchdog & Renewal Cockpit */}
       {activeTab === 'ssl' && (
-        <div className="space-y-6">
-          {/* SSL Overview Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card className="bg-card/70 border-border shadow-xs">
-              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Total Managed Certs</span>
-                <ShieldCheck className="w-4 h-4 text-primary" />
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className="text-2xl font-bold text-foreground">{certs.length}</div>
-                <p className="text-[11px] text-muted-foreground">Discovered via Certbot / Let's Encrypt</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card/70 border-border shadow-xs">
-              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Expiring Soon</span>
-                <Clock className="w-4 h-4 text-amber-500" />
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className={`text-2xl font-bold ${expiringSoonCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
-                  {expiringSoonCount}
-                </div>
-                <p className="text-[11px] text-muted-foreground">Due for renewal within 30 days</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card/70 border-border shadow-xs">
-              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Expired / Invalid</span>
-                <AlertTriangle className="w-4 h-4 text-rose-500" />
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className={`text-2xl font-bold ${expiredCount > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                  {expiredCount}
-                </div>
-                <p className="text-[11px] text-muted-foreground">Immediate action required</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Certificates Grid */}
-          <div className="grid grid-cols-1 gap-4">
-            {certs.length === 0 ? (
-              <Card className="bg-card/40 border-dashed">
-                <CardContent className="p-8 text-center space-y-2">
-                  <ShieldAlert className="w-8 h-8 text-muted-foreground mx-auto opacity-50" />
-                  <p className="text-sm font-semibold text-foreground">No Certbot Certificates Found</p>
-                  <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                    No active Let's Encrypt certificates were reported by <code>certbot certificates</code> on this server.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              certs.map((c, idx) => {
-                const days = c.days_remaining;
-                const isExpiring = days !== null && days <= 30 && days > 0;
-                const isExpired = !c.is_valid || (days !== null && days <= 0);
-
-                return (
-                  <Card key={idx} className="bg-card/80 border-border shadow-xs hover:border-primary/30 transition-all">
-                    <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div className="flex items-start gap-3.5 min-w-0">
-                        <div className={`p-2.5 rounded-xl border shrink-0 mt-0.5 ${
-                          isExpired 
-                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-500' 
-                            : isExpiring 
-                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-500' 
-                            : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                        }`}>
-                          <ShieldCheck className="h-5 w-5" />
-                        </div>
-
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-sm text-foreground truncate font-mono">
-                              {c.cert_name}
-                            </span>
-
-                            {isExpired ? (
-                              <Badge variant="outline" className="text-[10px] bg-rose-500/15 text-rose-500 border-rose-500/30 font-bold">
-                                Expired / Invalid
-                              </Badge>
-                            ) : isExpiring ? (
-                              <Badge variant="outline" className="text-[10px] bg-amber-500/15 text-amber-500 border-amber-500/30 font-bold">
-                                Expires in {days} days
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-500 border-emerald-500/30 font-semibold">
-                                Valid ({days !== null ? `${days} days left` : 'Active'})
-                              </Badge>
-                            )}
-                          </div>
-
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1 font-mono text-xs">
-                            <span className="text-muted-foreground">Domains:</span>
-                            {c.domain ? (
-                              c.domain.split(/\s+/).map((d, i) => (
-                                <span key={i} className="bg-muted px-2 py-0.5 rounded text-foreground border border-border/50">
-                                  {d}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-muted-foreground italic">None listed</span>
-                            )}
-                          </div>
-
-                          {c.expiry_date && (
-                            <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-muted-foreground/70" />
-                              <span>Expiry: {c.expiry_date}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => handleRenewCertificates(true)}
-                          disabled={actionLoading}
-                          className="h-8 text-xs border-border text-foreground hover:bg-accent"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 mr-1.5 text-sky-400" />
-                          Dry Run
-                        </Button>
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleRenewCertificates(false)}
-                          disabled={actionLoading}
-                          className="h-8 text-xs bg-primary text-primary-foreground font-semibold"
-                        >
-                          Renew
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
-        </div>
+        <SslCockpit serverId={serverId} />
       )}
+
 
       {/* Edit Config Modal */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
@@ -539,31 +324,6 @@ export const NginxManager: React.FC<NginxManagerProps> = ({ serverId }) => {
           </pre>
           <DialogFooter>
             <Button onClick={() => setTestModalOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Renewal Output Modal */}
-      <Dialog open={renewalModalOpen} onOpenChange={setRenewalModalOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {renewalSuccess ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              ) : (
-                <AlertTriangle className="h-5 w-5 text-amber-500" />
-              )}
-              <span>Certbot Renewal Terminal Output</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {renewalSuccess ? 'Certbot executed successfully.' : 'Review output for renewal warnings or errors.'}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="p-3.5 bg-muted/70 rounded-xl text-xs font-mono whitespace-pre-wrap overflow-x-auto text-foreground max-h-72 border border-border">
-            {renewalOutput || 'No output returned.'}
-          </pre>
-          <DialogFooter>
-            <Button onClick={() => setRenewalModalOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

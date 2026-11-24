@@ -9,6 +9,9 @@ use crate::ssh::client::SshClientHandler;
 use russh::client::Handle;
 use base64::Engine as _;
 
+use crate::commands::confirmation::consume_token;
+use chrono::{NaiveDateTime, Utc};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NginxSite {
     pub name: String,
@@ -27,7 +30,28 @@ pub struct SslCertificate {
     pub expiry_date: Option<String>,
     pub days_remaining: Option<i64>,
     pub is_valid: bool,
+    pub issuer: Option<String>,
+    pub cert_path: Option<String>,
+    pub status_level: String, // "healthy", "expiring_soon", "critical", "expired"
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SslOverview {
+    pub certificates: Vec<SslCertificate>,
+    pub total_certs: usize,
+    pub healthy_count: usize,
+    pub expiring_soon_count: usize,
+    pub expired_count: usize,
+    pub is_auto_renew_timer_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueCertPayload {
+    pub domain: String,
+    pub email: String,
+    pub staging_test: bool,
+}
+
 
 async fn exec_ssh_command(
     session: &mut Handle<SshClientHandler>,
@@ -363,37 +387,51 @@ pub async fn reload_nginx(
     res.map(|_| ())
 }
 
-#[tauri::command]
-pub async fn get_ssl_certificates(
-    state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-    server_id: String,
-) -> CommandResult<Vec<SslCertificate>> {
-    let session_arc = state.session_manager
-        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
-        .await?;
-    let mut session = session_arc.lock().await;
-
-    let cmd = "sudo certbot certificates 2>/dev/null || true";
-    let output = exec_ssh_command(&mut session, cmd).await.unwrap_or_default();
-
+fn parse_all_ssl_output(output: &str) -> (Vec<SslCertificate>, bool) {
     let mut certs = Vec::new();
+    let mut is_timer_active = false;
+
+    let parts: Vec<&str> = output.split("===OPENSSL_CERTS===").collect();
+    let certbot_part = parts.get(0).copied().unwrap_or("");
+    let remainder = parts.get(1).copied().unwrap_or("");
+
+    let (openssl_part, timer_part) = if let Some(idx) = remainder.find("===TIMER_STATUS===") {
+        (&remainder[..idx], &remainder[idx + 18..])
+    } else {
+        (remainder, "")
+    };
+
+    if timer_part.contains("active") {
+        is_timer_active = true;
+    }
+
+    // 1. Parse Certbot Output
     let mut current_name = String::new();
     let mut current_domains = String::new();
     let mut current_expiry = None;
     let mut days_remaining = None;
     let mut is_valid = true;
 
-    for line in output.lines() {
+    for line in certbot_part.lines() {
         let trimmed = line.trim();
         if let Some(name) = trimmed.strip_prefix("Certificate Name:") {
             if !current_name.is_empty() {
+                let status_level = match days_remaining {
+                    Some(d) if d <= 0 => "expired",
+                    Some(d) if d < 15 => "critical",
+                    Some(d) if d <= 30 => "expiring_soon",
+                    _ => if is_valid { "healthy" } else { "expired" },
+                }.to_string();
+
                 certs.push(SslCertificate {
                     domain: current_domains.clone(),
                     cert_name: current_name.clone(),
                     expiry_date: current_expiry.clone(),
                     days_remaining,
                     is_valid,
+                    issuer: Some("Let's Encrypt".to_string()),
+                    cert_path: Some(format!("/etc/letsencrypt/live/{}/fullchain.pem", current_name)),
+                    status_level,
                 });
             }
             current_name = name.trim().to_string();
@@ -418,16 +456,211 @@ pub async fn get_ssl_certificates(
     }
 
     if !current_name.is_empty() {
+        let status_level = match days_remaining {
+            Some(d) if d <= 0 => "expired",
+            Some(d) if d < 15 => "critical",
+            Some(d) if d <= 30 => "expiring_soon",
+            _ => if is_valid { "healthy" } else { "expired" },
+        }.to_string();
+
         certs.push(SslCertificate {
             domain: current_domains,
-            cert_name: current_name,
+            cert_name: current_name.clone(),
             expiry_date: current_expiry,
             days_remaining,
             is_valid,
+            issuer: Some("Let's Encrypt".to_string()),
+            cert_path: Some(format!("/etc/letsencrypt/live/{}/fullchain.pem", current_name)),
+            status_level,
         });
     }
 
-    Ok(certs)
+    // 2. Parse OpenSSL certificates from Nginx directives
+    let now = Utc::now().naive_utc();
+    let cert_blocks = openssl_part.split("---END_CERT---");
+
+    for block in cert_blocks {
+        let trimmed_block = block.trim();
+        if trimmed_block.is_empty() {
+            continue;
+        }
+
+        let mut path = String::new();
+        let mut subject_cn = String::new();
+        let mut issuer_name = String::new();
+        let mut not_after = String::new();
+        let mut san_domains = Vec::new();
+
+        for line in trimmed_block.lines() {
+            let l = line.trim();
+            if let Some(p) = l.strip_prefix("PATH:") {
+                path = p.trim().to_string();
+            } else if l.contains("subject=") {
+                if let Some(idx) = l.find("CN = ") {
+                    subject_cn = l[idx + 5..].split(',').next().unwrap_or("").trim().to_string();
+                } else if let Some(idx) = l.find("CN=") {
+                    subject_cn = l[idx + 3..].split(',').next().unwrap_or("").trim().to_string();
+                }
+            } else if l.contains("issuer=") {
+                if l.contains("Cloudflare") {
+                    issuer_name = "Cloudflare Origin CA".to_string();
+                } else if l.contains("Let's Encrypt") {
+                    issuer_name = "Let's Encrypt".to_string();
+                } else if l.contains("DigiCert") {
+                    issuer_name = "DigiCert".to_string();
+                } else if l.contains("ZeroSSL") {
+                    issuer_name = "ZeroSSL".to_string();
+                } else if let Some(idx) = l.find("O = ") {
+                    issuer_name = l[idx + 4..].split(',').next().unwrap_or("Custom / Enterprise").trim().to_string();
+                } else {
+                    issuer_name = "Custom / Self-Signed".to_string();
+                }
+            } else if let Some(na) = l.strip_prefix("notAfter=") {
+                not_after = na.trim().to_string();
+            } else if l.contains("DNS:") {
+                for item in l.split(',') {
+                    let item = item.trim();
+                    if let Some(dns) = item.strip_prefix("DNS:") {
+                        let clean = dns.trim().to_string();
+                        if !clean.is_empty() && !san_domains.contains(&clean) {
+                            san_domains.push(clean);
+                        }
+                    }
+                }
+            }
+        }
+
+        if path.is_empty() {
+            continue;
+        }
+
+        // Deduplicate against certbot certs
+        let already_listed = certs.iter().any(|c| {
+            if let Some(ref cp) = c.cert_path {
+                if cp == &path { return true; }
+            }
+            if !subject_cn.is_empty() && (c.cert_name == subject_cn || c.domain.contains(&subject_cn)) {
+                return true;
+            }
+            false
+        });
+
+        if already_listed {
+            continue;
+        }
+
+        let cert_display_name = if !subject_cn.is_empty() {
+            subject_cn.clone()
+        } else {
+            path.rsplit('/').next().unwrap_or(&path).to_string()
+        };
+
+        let domains_str = if !san_domains.is_empty() {
+            san_domains.join(" ")
+        } else if !subject_cn.is_empty() {
+            subject_cn.clone()
+        } else {
+            cert_display_name.clone()
+        };
+
+        let mut openssl_days_remaining = None;
+        let mut is_cert_valid = true;
+
+        if !not_after.is_empty() {
+            let normalized_date = not_after.split_whitespace().collect::<Vec<_>>().join(" ");
+            if let Ok(expiry_dt) = NaiveDateTime::parse_from_str(&normalized_date, "%b %d %H:%M:%S %Y GMT") {
+                let diff_days = (expiry_dt - now).num_days();
+                openssl_days_remaining = Some(diff_days);
+                if diff_days <= 0 {
+                    is_cert_valid = false;
+                }
+            }
+        }
+
+        let status_level = match openssl_days_remaining {
+            Some(d) if d <= 0 => "expired",
+            Some(d) if d < 15 => "critical",
+            Some(d) if d <= 30 => "expiring_soon",
+            _ => if is_cert_valid { "healthy" } else { "expired" },
+        }.to_string();
+
+        certs.push(SslCertificate {
+            domain: domains_str,
+            cert_name: cert_display_name,
+            expiry_date: if not_after.is_empty() { None } else { Some(not_after) },
+            days_remaining: openssl_days_remaining,
+            is_valid: is_cert_valid,
+            issuer: if issuer_name.is_empty() { Some("Custom / SSL".into()) } else { Some(issuer_name) },
+            cert_path: Some(path),
+            status_level,
+        });
+    }
+
+    (certs, is_timer_active)
+}
+
+#[tauri::command]
+pub async fn get_ssl_overview(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+) -> CommandResult<SslOverview> {
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let cmd = r#"
+export LC_ALL=C
+sudo certbot certificates 2>/dev/null || true
+echo "===OPENSSL_CERTS==="
+grep -rohP '(?<=ssl_certificate\s)[^;]+' /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null | sort -u | while read -r cert_file; do
+    cert_file=$(echo "$cert_file" | tr -d ' "')
+    if [ -f "$cert_file" ]; then
+        echo "PATH:$cert_file"
+        openssl x509 -in "$cert_file" -noout -subject -issuer -dates 2>/dev/null || true
+        openssl x509 -in "$cert_file" -noout -ext subjectAltName 2>/dev/null || true
+        echo "---END_CERT---"
+    fi
+done
+echo "===TIMER_STATUS==="
+systemctl is-active certbot.timer 2>/dev/null || echo "inactive"
+"#;
+
+    let output = exec_ssh_command(&mut session, cmd).await.unwrap_or_default();
+    let (certificates, is_auto_renew_timer_active) = parse_all_ssl_output(&output);
+
+    let total_certs = certificates.len();
+    let mut healthy_count = 0;
+    let mut expiring_soon_count = 0;
+    let mut expired_count = 0;
+
+    for c in &certificates {
+        match c.status_level.as_str() {
+            "critical" | "expired" => expired_count += 1,
+            "expiring_soon" => expiring_soon_count += 1,
+            _ => healthy_count += 1,
+        }
+    }
+
+    Ok(SslOverview {
+        certificates,
+        total_certs,
+        healthy_count,
+        expiring_soon_count,
+        expired_count,
+        is_auto_renew_timer_active,
+    })
+}
+
+#[tauri::command]
+pub async fn get_ssl_certificates(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+) -> CommandResult<Vec<SslCertificate>> {
+    let overview = get_ssl_overview(state, app_handle, server_id).await?;
+    Ok(overview.certificates)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -436,12 +669,13 @@ pub struct CertRenewalResult {
     pub output: String,
 }
 
-/// Triggers certbot renewal (dry run or real renewal) for all domains
+/// Triggers certbot renewal (dry run or real renewal) for all domains or specific cert
 #[tauri::command]
 pub async fn renew_ssl_certificates(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
     server_id: String,
+    cert_name: Option<String>,
     dry_run: bool,
 ) -> CommandResult<CertRenewalResult> {
     let start_time = std::time::Instant::now();
@@ -450,24 +684,32 @@ pub async fn renew_ssl_certificates(
         .await?;
     let mut session = session_arc.lock().await;
 
-    let cmd = if dry_run {
-        "sudo certbot renew --dry-run 2>&1"
+    let cert_target = cert_name.as_deref().unwrap_or("");
+    let cert_arg = if !cert_target.is_empty() {
+        format!("--cert-name {} ", cert_target)
     } else {
-        "sudo certbot renew --nginx --non-interactive 2>&1"
+        "".to_string()
     };
 
-    let output = exec_ssh_command(&mut session, cmd).await?;
+    let cmd = if dry_run {
+        format!("sudo certbot renew {}--dry-run 2>&1", cert_arg)
+    } else {
+        format!("sudo certbot renew {}--nginx --non-interactive 2>&1; sudo systemctl reload nginx 2>/dev/null || sudo nginx -s reload 2>/dev/null || true", cert_arg)
+    };
+
+    let output = exec_ssh_command(&mut session, &cmd).await?;
     let success = output.contains("Congratulations, all renewals succeeded") 
         || output.contains("The following certificates are not due for renewal yet")
         || output.contains("dry run: all simulated renewals succeeded")
+        || output.contains("Certificate not yet due for renewal")
         || (!output.contains("FAILED") && !output.contains("An error occurred"));
 
     {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
         log_activity(&conn, ActivityEntry {
             server_id: Some(server_id),
-            action: if dry_run { "ssl_certbot_dry_run".into() } else { "ssl_certbot_renew".into() },
-            target: Some("certbot".into()),
+            action: if dry_run { "ssl_certbot_dry_run".into() } else { actions::RENEW_SSL_CERTIFICATES.into() },
+            target: Some(if cert_target.is_empty() { "all_certificates".into() } else { cert_target.into() }),
             status: if success { "success".into() } else { "failed".into() },
             detail: Some(output.lines().take(5).collect::<Vec<_>>().join("\n")),
             duration_ms: Some(start_time.elapsed().as_millis() as i64),
@@ -476,3 +718,130 @@ pub async fn renew_ssl_certificates(
 
     Ok(CertRenewalResult { success, output })
 }
+
+#[tauri::command]
+pub async fn issue_ssl_certificate(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    payload: IssueCertPayload,
+) -> CommandResult<CertRenewalResult> {
+    let start_time = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let domain = payload.domain.trim();
+    if domain.is_empty() {
+        return Err(CommandError::Validation("Domain cannot be empty".into()));
+    }
+
+    let staging_flag = if payload.staging_test { "--staging " } else { "" };
+    let email_arg = if !payload.email.trim().is_empty() {
+        format!("-m {} ", payload.email.trim())
+    } else {
+        "--register-unsafely-without-email ".to_string()
+    };
+
+    let cmd = format!(
+        "sudo certbot --nginx -d {} --non-interactive --agree-tos {}{}--redirect 2>&1; sudo systemctl reload nginx 2>/dev/null || sudo nginx -s reload 2>/dev/null || true",
+        domain, email_arg, staging_flag
+    );
+
+    let output = exec_ssh_command(&mut session, &cmd).await?;
+    let success = output.contains("Congratulations")
+        || output.contains("Successfully received certificate")
+        || output.contains("Certificate not yet due for renewal")
+        || (!output.contains("An error occurred") && !output.contains("FAILED"));
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::ISSUE_SSL_CERTIFICATE.into(),
+            target: Some(domain.into()),
+            status: if success { "success".into() } else { "failed".into() },
+            detail: Some(output.lines().take(6).collect::<Vec<_>>().join("\n")),
+            duration_ms: Some(start_time.elapsed().as_millis() as i64),
+        });
+    }
+
+    Ok(CertRenewalResult { success, output })
+}
+
+#[tauri::command]
+pub async fn toggle_ssl_auto_renewal(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    enable: bool,
+) -> CommandResult<bool> {
+    let start_time = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let cmd = if enable {
+        "sudo systemctl enable --now certbot.timer 2>&1"
+    } else {
+        "sudo systemctl disable --now certbot.timer 2>&1"
+    };
+
+    let output = exec_ssh_command(&mut session, cmd).await?;
+    let success = !output.contains("Failed to");
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::TOGGLE_SSL_AUTO_RENEWAL.into(),
+            target: Some("certbot.timer".into()),
+            status: if success { "success".into() } else { "failed".into() },
+            detail: Some(format!("Auto-renewal timer set to: {}", enable)),
+            duration_ms: Some(start_time.elapsed().as_millis() as i64),
+        });
+    }
+
+    Ok(enable)
+}
+
+#[tauri::command]
+pub async fn delete_ssl_certificate(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    cert_name: String,
+    confirmation_token: Option<String>,
+) -> CommandResult<String> {
+    consume_token(confirmation_token.as_deref()).await?;
+
+    let start_time = Instant::now();
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let cmd = format!("sudo certbot delete --cert-name {} --non-interactive 2>&1", cert_name);
+    let output = exec_ssh_command(&mut session, &cmd).await?;
+    let success = output.contains("Deleted all files relating to certificate")
+        || output.contains("Successfully deleted")
+        || !output.contains("No certificate found");
+
+    if let Ok(conn) = state.db.lock() {
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::DELETE_SSL_CERTIFICATE.into(),
+            target: Some(cert_name.clone()),
+            status: if success { "success".into() } else { "failed".into() },
+            detail: Some(output.lines().take(4).collect::<Vec<_>>().join("\n")),
+            duration_ms: Some(start_time.elapsed().as_millis() as i64),
+        });
+    }
+
+    if success {
+        Ok(format!("Successfully deleted certificate {}", cert_name))
+    } else {
+        Err(CommandError::Internal(output))
+    }
+}
+
