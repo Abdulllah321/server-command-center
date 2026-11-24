@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -1165,6 +1165,57 @@ export const runCronJobNow = async (
     command,
   });
 };
+
+// Historical Metrics & Process Top Consumers
+export const getMetricsHistory = async (
+  serverId: string,
+  timeRange: MetricsHistoryRange = '1h'
+): Promise<MetricPoint[]> => {
+  return await invoke('get_metrics_history', { serverId, timeRange });
+};
+
+export const recordMetricPoint = async (
+  serverId: string,
+  cpuPct: number,
+  ramPct: number,
+  diskPct: number,
+  load1m: number
+): Promise<void> => {
+  return await invoke('record_metric_point', {
+    serverId,
+    cpuPct,
+    ramPct,
+    diskPct,
+    load1m,
+  });
+};
+
+export const getTopProcesses = async (
+  serverId: string,
+  sortBy: ProcessSortBy = 'cpu',
+  limit: number = 35
+): Promise<ProcessItem[]> => {
+  return await invoke('get_top_processes', {
+    serverId,
+    sortBy,
+    limit,
+  });
+};
+
+export const killServerProcess = async (
+  serverId: string,
+  pid: number,
+  signal: 'SIGTERM' | 'SIGKILL' | 'SIGHUP' = 'SIGTERM',
+  confirmationToken?: string
+): Promise<string> => {
+  return await invoke('kill_server_process', {
+    serverId,
+    pid,
+    signal,
+    confirmationToken: confirmationToken || null,
+  });
+};
+
 
 
 

@@ -536,5 +536,30 @@ export interface CronRunResult {
   success: boolean;
 }
 
+export interface MetricPoint {
+  timestamp: string;
+  cpu_pct: number;
+  ram_pct: number;
+  disk_pct: number;
+  load_1m: number;
+}
+
+export type MetricsHistoryRange = '1h' | '24h' | '7d';
+
+export interface ProcessItem {
+  pid: number;
+  ppid: number;
+  user: string;
+  cpu_pct: number;
+  mem_pct: number;
+  vsz_kb: number;
+  rss_kb: number;
+  stat: string;
+  command: string;
+  args: string;
+}
+
+export type ProcessSortBy = 'cpu' | 'mem';
+
 
 

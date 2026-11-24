@@ -24,8 +24,8 @@ pub async fn get_health(
         fetch_health_snapshot(&mut session_handle).await
     };
 
-    match res {
-        Ok(snapshot) => Ok(snapshot),
+    let snapshot = match res {
+        Ok(snapshot) => snapshot,
         Err(e) => {
             let err_str = e.to_string();
             if err_str.contains("ConnectFailed") || err_str.contains("Failed to open SSH channel") || err_str.contains("closed") {
@@ -36,12 +36,22 @@ pub async fn get_health(
                     .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
                     .await?;
                 let mut new_handle = new_session_arc.lock().await;
-                fetch_health_snapshot(&mut new_handle).await
+                fetch_health_snapshot(&mut new_handle).await?
             } else {
-                Err(e)
+                return Err(e);
             }
         }
+    };
+
+    // Auto-record metric point into local history
+    if let Ok(conn) = state.db.lock() {
+        let _ = conn.execute(
+            "INSERT INTO server_metrics_history (server_id, cpu_pct, ram_pct, disk_pct, load_1m) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![&server_id, snapshot.cpu_pct, snapshot.ram_pct, snapshot.disk_pct, snapshot.load_avg.0],
+        );
     }
+
+    Ok(snapshot)
 }
 
 pub fn start_ping_loop(db_arc: Arc<std::sync::Mutex<Connection>>) {

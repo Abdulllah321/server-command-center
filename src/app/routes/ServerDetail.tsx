@@ -48,6 +48,8 @@ import { ServerRebuildDeck } from '@/features/rebuild/components/ServerRebuildDe
 import { EnvManager } from '@/features/env/components/EnvManager';
 import { DatabaseManager } from '@/features/databases/components/DatabaseManager';
 import { CronManager } from '@/features/cron/components/CronManager';
+import { HistoricalMetricsCharts } from '@/features/health/components/HistoricalMetricsCharts';
+import { ProcessConsumersTable } from '@/features/health/components/ProcessConsumersTable';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -487,6 +489,12 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
           
           <HealthWidget serverId={id} variant="full" pollInterval={activeTab === 'overview' ? 10000 : 0} />
           
+          {/* Historical Resource Telemetry Timeline */}
+          <HistoricalMetricsCharts serverId={id} />
+
+          {/* Top OS Process Consumers Deck */}
+          <ProcessConsumersTable serverId={id} />
+
           <QuickActionsGrid serverId={id} />
         </TabsContent>
 

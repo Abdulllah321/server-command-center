@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.8';
+export const APP_VERSION = '1.2.9';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,20 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.9': {
+    summary: 'Historical Metrics & Process Top Consumers: Local persistent SQLite metrics history (1h, 24h, 7d) for CPU, RAM, Disk, and Load averages with interactive SVG charts, alongside a real-time Top Process Consumers deck with sort, filter, and 1-click token-gated termination.',
+    highlights: [
+      'Local Metrics Persistence: Automated SQLite storage for server telemetry snapshots with rolling 7-day retention and intelligent multi-resolution downsampling (10m buckets for 24h, 1h buckets for 7d).',
+      'Interactive Historical Telemetry Charts: Full SVG area/line trend charts with hover crosshairs, precise tooltips, min/max/average stat summary pills, and 1h / 24h / 7d time-range selectors.',
+      'Top Process Consumers Deck: Live inspection of remote OS processes with % CPU, % Memory, RSS, state flags, and collapsible command line arguments.',
+      'Sorting & Real-Time Filtering: Sort processes dynamically by % CPU or % Memory, with instant search filtering by binary, user, PID, or command args.',
+      'Safe Process Termination: 1-click process termination supporting both graceful SIGTERM (15) and immediate force SIGKILL (9), strictly gated behind confirmation tokens and protected against terminating system init (PID 1).'
+    ],
+    features: [
+      'Backend Commands: `get_metrics_history`, `record_metric_point`, `get_top_processes`, and `kill_server_process` over pooled SSH.',
+      'Activity Audit: Process terminations are cryptographically validated and logged to the central activity log.'
+    ]
+  },
   'v1.2.8': {
     summary: 'Crontab & Scheduled Automation Manager: Direct remote crontab synchronization, visual cron schedule builder with plain-English translator, 1-click ad-hoc execution ("Run Now"), and curated automation runbooks.',
     highlights: [

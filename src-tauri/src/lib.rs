@@ -219,6 +219,10 @@ pub fn run() {
         commands::cron::toggle_server_cron_job,
         commands::cron::delete_server_cron_job,
         commands::cron::run_cron_job_now,
+        commands::metrics::get_metrics_history,
+        commands::metrics::record_metric_point,
+        commands::metrics::get_top_processes,
+        commands::metrics::kill_server_process,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])
