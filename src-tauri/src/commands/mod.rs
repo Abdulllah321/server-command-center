@@ -25,5 +25,6 @@ pub mod updater;
 pub mod env_vars;
 pub mod fleet;
 pub mod database;
+pub mod cron;
 
 

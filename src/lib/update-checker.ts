@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.7';
+export const APP_VERSION = '1.2.8';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,20 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.8': {
+    summary: 'Crontab & Scheduled Automation Manager: Direct remote crontab synchronization, visual cron schedule builder with plain-English translator, 1-click ad-hoc execution ("Run Now"), and curated automation runbooks.',
+    highlights: [
+      'Direct Crontab Synchronization: View, edit, and manage user and system crontabs directly (crontab -l, crontab -) with live active vs. paused (commented out) state detection.',
+      'Visual Schedule Builder & Plain-English Translation: Craft schedules with presets (every minute, 5/15 mins, hourly, daily, weekly, monthly, @reboot) with real-time human-language description preview (e.g. "Daily at 02:00 AM").',
+      '1-Click Ad-Hoc Execution ("Run Now"): Instantly trigger any scheduled task on demand over pooled SSH without waiting for its cron interval, with real-time stdout/stderr log capture and exit status.',
+      'Curated Automation Runbooks Palette: 1-click installation of production-ready automation scripts (SSL auto-renewal, log compression & purge, temp/session cleanup, weekly PageCache drop, Docker prune, database auto-vacuum).',
+      'Safe Editing & Token Gate: Dangerous cron jobs (system wipe, mkfs, destructive deletes) require explicit confirmation tokens before installation.'
+    ],
+    features: [
+      'Native Backend Commands: `list_server_cron_jobs`, `save_server_cron_job`, `toggle_server_cron_job`, `delete_server_cron_job`, and `run_cron_job_now` over pooled SSH.',
+      'Audit Logging: Crontab modifications and manual triggers are securely recorded in the Activity Log.'
+    ]
+  },
   'v1.2.7': {
     summary: 'Database Query Runner & Connection Monitor: Multi-engine support for PostgreSQL, MySQL, and Redis, with real-time query execution, live client connection monitoring, table disk size analysis, and read-only Safe Mode.',
     highlights: [

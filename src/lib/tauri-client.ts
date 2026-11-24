@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -1109,6 +1109,60 @@ export const getDatabaseSchemaTables = async (
     engine,
     database,
     credentials: credentials || null,
+  });
+};
+
+// ==========================================
+// Crontab & Scheduled Automation Manager
+// ==========================================
+
+export const listServerCronJobs = async (serverId: string): Promise<CronJobItem[]> => {
+  return await invoke('list_server_cron_jobs', { serverId });
+};
+
+export const saveServerCronJob = async (
+  serverId: string,
+  job: SaveCronJobPayload,
+  confirmationToken?: string
+): Promise<CronJobItem> => {
+  return await invoke('save_server_cron_job', {
+    serverId,
+    job,
+    confirmationToken: confirmationToken || null,
+  });
+};
+
+export const toggleServerCronJob = async (
+  serverId: string,
+  jobId: string,
+  enabled: boolean
+): Promise<boolean> => {
+  return await invoke('toggle_server_cron_job', {
+    serverId,
+    jobId,
+    enabled,
+  });
+};
+
+export const deleteServerCronJob = async (
+  serverId: string,
+  jobId: string,
+  confirmationToken?: string
+): Promise<boolean> => {
+  return await invoke('delete_server_cron_job', {
+    serverId,
+    jobId,
+    confirmationToken: confirmationToken || null,
+  });
+};
+
+export const runCronJobNow = async (
+  serverId: string,
+  command: string
+): Promise<CronRunResult> => {
+  return await invoke('run_cron_job_now', {
+    serverId,
+    command,
   });
 };
 

@@ -47,3 +47,4 @@ Server Command Center `v1.2.7` introduces the **Database Deck**, a high-performa
 - `Server.Command.Center_1.2.7_x64-setup.exe` — Windows Setup Installer (NSIS)
 - `server-command-center.exe` — Windows Portable Executable
 - `checksums-windows-x64.txt` — SHA-256 verification hashes
+

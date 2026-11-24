@@ -509,5 +509,32 @@ export interface DatabaseSchemaSummary {
   keyspaces: string[] | null;
 }
 
+export interface CronJobItem {
+  id: string;
+  schedule: string;
+  command: string;
+  comment: string | null;
+  enabled: boolean;
+  is_system: boolean;
+  human_readable: string;
+  raw_line: string;
+}
+
+export interface SaveCronJobPayload {
+  id?: string;
+  schedule: string;
+  command: string;
+  comment?: string;
+  enabled: boolean;
+}
+
+export interface CronRunResult {
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  duration_ms: number;
+  success: boolean;
+}
+
 
 

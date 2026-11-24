@@ -28,7 +28,8 @@ import {
   FolderTree,
   ShieldCheck,
   FileKey,
-  Database
+  Database,
+  CalendarClock
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
@@ -46,6 +47,7 @@ import { LogViewer } from '@/features/logs/components/LogViewer';
 import { ServerRebuildDeck } from '@/features/rebuild/components/ServerRebuildDeck';
 import { EnvManager } from '@/features/env/components/EnvManager';
 import { DatabaseManager } from '@/features/databases/components/DatabaseManager';
+import { CronManager } from '@/features/cron/components/CronManager';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -233,6 +235,13 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
       icon: Database, 
       accentColor: 'text-violet-400', 
       accentBg: 'bg-violet-400' 
+    },
+    { 
+      id: 'cron', 
+      label: 'Crontab', 
+      icon: CalendarClock, 
+      accentColor: 'text-amber-400', 
+      accentBg: 'bg-amber-400' 
     },
     { 
       id: 'security', 
@@ -554,6 +563,11 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
         {/* Tab: Databases */}
         <TabsContent value="databases" className="flex-1 mt-6 overflow-hidden">
           <DatabaseManager serverId={id!} isOnline={isOnline} />
+        </TabsContent>
+
+        {/* Tab: Crontab & Automation */}
+        <TabsContent value="cron" className="flex-1 mt-6 overflow-hidden">
+          <CronManager serverId={id!} isOnline={isOnline} />
         </TabsContent>
 
         {/* Tab 9: Security & Ports */}

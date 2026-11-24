@@ -71,3 +71,9 @@ pub const FLEET_COMMAND: &str = "fleet_command";
 pub const DATABASE_QUERY: &str = "database_query";
 pub const TERMINATE_DATABASE_CONNECTION: &str = "terminate_database_connection";
 
+pub const CREATE_CRON_JOB: &str = "create_cron_job";
+pub const UPDATE_CRON_JOB: &str = "update_cron_job";
+pub const DELETE_CRON_JOB: &str = "delete_cron_job";
+pub const TOGGLE_CRON_JOB: &str = "toggle_cron_job";
+pub const RUN_CRON_JOB_NOW: &str = "run_cron_job_now";
+

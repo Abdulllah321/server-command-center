@@ -214,6 +214,11 @@ pub fn run() {
         commands::database::get_database_connections,
         commands::database::terminate_database_connection,
         commands::database::get_database_schema_tables,
+        commands::cron::list_server_cron_jobs,
+        commands::cron::save_server_cron_job,
+        commands::cron::toggle_server_cron_job,
+        commands::cron::delete_server_cron_job,
+        commands::cron::run_cron_job_now,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])
