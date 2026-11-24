@@ -60,6 +60,7 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         ("0006_backup_schedules", include_str!("migrations/0006_backup_schedules.sql")),
         ("0007_backup_cloud_metadata", include_str!("migrations/0007_backup_cloud_metadata.sql")),
         ("0008_server_metrics_history", include_str!("migrations/0008_server_metrics_history.sql")),
+        ("0009_server_provisioning", include_str!("migrations/0009_server_provisioning.sql")),
     ];
 
     for (migration_id, migration_sql) in migrations {

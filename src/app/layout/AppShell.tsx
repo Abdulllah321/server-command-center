@@ -7,12 +7,15 @@ import { WorkspaceTabViewport } from './WorkspaceTabViewport';
 import { MobileBottomNav } from './MobileBottomNav';
 import { SearchPalette } from '@/features/search/components/SearchPalette';
 import { HostKeyModal } from '@/features/servers/components/HostKeyModal';
+import { ServerProvisionWizard } from '@/features/provision/components/ServerProvisionWizard';
 import { useWorkspaceTabsStore } from '@/stores/use-workspace-tabs-store';
+import { useUIStore } from '@/stores/use-ui-store';
 
 export const AppShell = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
   const openTab = useWorkspaceTabsStore((s) => s.openTab);
+  const { isProvisionModalOpen, setProvisionModalOpen, provisionTargetServerId } = useUIStore();
 
   // Sync route transitions with workspace tabs
   useEffect(() => {
@@ -99,6 +102,11 @@ export const AppShell = () => {
       <MobileBottomNav onSearchClick={() => setSearchOpen(true)} />
       <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <HostKeyModal />
+      <ServerProvisionWizard
+        open={isProvisionModalOpen}
+        onOpenChange={setProvisionModalOpen}
+        preselectedServerId={provisionTargetServerId || undefined}
+      />
     </div>
   );
 };

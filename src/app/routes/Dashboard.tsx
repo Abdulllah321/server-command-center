@@ -9,14 +9,15 @@ import {
   Search, 
   X,
   Layers,
-  Sparkles
+  Sparkles,
+  Rocket
 } from 'lucide-react';
 import { ServerModal } from '@/features/servers/components/ServerModal';
 import { useUIStore } from '@/stores/use-ui-store';
 import { useServers } from '@/features/servers/api/use-servers';
 
 export const Dashboard = () => {
-  const { isServerModalOpen, setServerModalOpen } = useUIStore();
+  const { isServerModalOpen, setServerModalOpen, openProvisionModal } = useUIStore();
   const [environmentFilter, setEnvironmentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -56,7 +57,15 @@ export const Dashboard = () => {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <Button 
+              variant="outline"
+              onClick={() => openProvisionModal()}
+              className="border-primary/30 hover:border-primary/60 text-primary bg-primary/5 hover:bg-primary/10 font-semibold shadow-xs flex items-center gap-2 h-9 text-xs sm:text-sm"
+            >
+              <Rocket className="h-4 w-4 text-primary" />
+              Provision Fresh Server
+            </Button>
             <Button 
               onClick={() => setServerModalOpen(true)}
               className="bg-primary text-primary-foreground font-semibold shadow-sm flex items-center gap-2 h-9 text-xs sm:text-sm"

@@ -52,3 +52,4 @@ Server Command Center **v1.3.0** introduces a complete, production-grade SSL cer
 | **Linux** | `server-command-center_1.3.0_amd64.deb` / `.AppImage` | Debian / Ubuntu & Standalone AppImage |
 
 *Server Command Center by Falah Tech — Professional Desktop Infrastructure Command.*
+

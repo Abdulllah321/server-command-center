@@ -10,14 +10,17 @@ import {
   PanelLeftOpen, 
   FolderTree, 
   Radio,
+  Rocket,
   X 
 } from 'lucide-react';
 import { GroupTree } from '@/features/groups/components/GroupTree';
 import { useVaultStore } from '@/stores/use-vault-store';
 import { useUiStore } from '@/stores/ui-store';
+import { useUIStore } from '@/stores/use-ui-store';
 
 export const Sidebar = () => {
   const isUnlocked = useVaultStore((state) => state.isUnlocked);
+  const openProvisionModal = useUIStore((state) => state.openProvisionModal);
   const { 
     sidebarCollapsed, 
     toggleSidebar, 
@@ -131,6 +134,20 @@ export const Sidebar = () => {
               <Radio className="h-4 w-4 shrink-0 text-cyan-400" />
               {!isCollapsed && <span className="text-sm font-medium">Fleet Commander</span>}
             </NavLink>
+
+            <button
+              onClick={() => {
+                handleNavClick();
+                openProvisionModal();
+              }}
+              title="Provision Fresh Server (Zero Docker)"
+              className={`flex items-center gap-3 px-3 py-2 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200 cursor-pointer ${
+                isCollapsed ? 'justify-center px-2' : ''
+              }`}
+            >
+              <Rocket className="h-4 w-4 shrink-0 text-primary" />
+              {!isCollapsed && <span className="text-sm font-medium">Provision Server</span>}
+            </button>
           </nav>
 
           {/* Groups Section */}

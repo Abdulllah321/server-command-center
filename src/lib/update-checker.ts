@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,22 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.1': {
+    summary: 'Fresh Server Provisioning & Setup Wizard: Complete server bootstrap engine to transform bare-metal or cloud VPS instances into production-hardened hosts with zero Docker overhead. Features 1-click architecture presets, non-root deploy user creation, swap memory protection, UFW firewall, fail2ban defense, standalone Bash script export, and real-time streaming SSH terminal execution.',
+    highlights: [
+      'Flexible Destination Modes: Provision freshly created VPS instances directly via root credentials or re-bootstrap and harden existing servers already in your fleet.',
+      'Curated Architecture Presets: 1-click recipes for Node & PM2 Production, Full-Stack PostgreSQL + Redis, Full-Stack MariaDB + Redis, Minimal Hardened Base, and Custom Blueprints.',
+      'Swap Memory Optimizer: Configurable swapfile creation (1GB, 2GB, 4GB, 8GB) with kernel swappiness tuning and fstab persistence to prevent out-of-memory build failures on budget VPSs.',
+      'Native Linux Security Suite: Zero Docker! Automated UFW firewall rules, fail2ban SSH brute-force jail defense, non-root sudo deploy user, and optional SSH hardening (disabling root login and password auth).',
+      'Standalone Bash Script Generator: Instant preview, copy, or download of the complete POSIX bootstrap script for external auditing or cloud-init automation.',
+      'Real-Time Execution & Terminal Stream: Live step-by-step pipeline tracker with animated status icons, duration counters, line-by-line SSH terminal output streaming, and safe cancellation control.',
+      'Audit Archive: All provisioning executions and stdout/stderr logs are permanently recorded in the local SQLite database (`server_provisioning_logs`).'
+    ],
+    features: [
+      'Backend Commands: `generate_provision_script`, `start_server_provisioning`, `cancel_server_provisioning`, and `get_provision_history`.',
+      'Event Channels: Real-time telemetry streamed via `provision://step:SESSION_ID`, `provision://log:SESSION_ID`, and `provision://complete:SESSION_ID`.'
+    ]
+  },
   'v1.3.0': {
     summary: 'SSL Certificate Expiry Watchdog & Renewal Cockpit: Universal multi-domain discovery (Certbot + direct OpenSSL Nginx config parsing), color-coded expiration countdown badges, 1-click Let\'s Encrypt certificate issuance with dry-run verification, systemd auto-renewal timer toggle, and proactive expiration alert banners.',
     highlights: [

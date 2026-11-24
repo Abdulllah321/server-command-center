@@ -27,5 +27,6 @@ pub mod fleet;
 pub mod database;
 pub mod cron;
 pub mod metrics;
+pub mod provision;
 
 

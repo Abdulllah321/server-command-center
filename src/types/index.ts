@@ -580,5 +580,112 @@ export interface ProcessItem {
 
 export type ProcessSortBy = 'cpu' | 'mem';
 
+// =============================================================================
+// Server Provisioning & Bootstrap Engine (Zero Docker)
+// =============================================================================
+
+export interface NewServerDetails {
+  name: string;
+  hostname: string;
+  ssh_port: number;
+  username: string;
+  auth_method: 'password' | 'private_key';
+  secret: string;
+  master_password_if_needed?: string;
+  environment: 'production' | 'staging' | 'dev';
+  description?: string;
+  tags: string[];
+}
+
+export interface ProvisionPlan {
+  server_id?: string;
+  new_server?: NewServerDetails;
+
+  // User & Hardening
+  create_deploy_user: boolean;
+  deploy_username: string;
+  deploy_public_key?: string;
+  disable_root_login: boolean;
+  disable_password_auth: boolean;
+  server_hostname?: string;
+  timezone?: string;
+  enable_unattended_upgrades: boolean;
+
+  // Swap Memory Protection
+  swap_size_gb: number;
+  swappiness: number;
+
+  // Firewall & Security Suite
+  enable_ufw: boolean;
+  ufw_allow_ports: string[];
+  enable_fail2ban: boolean;
+
+  // Runtimes & Essentials
+  install_essentials: boolean;
+  install_node: boolean;
+  node_version: string;
+  install_pm2: boolean;
+  install_bun: boolean;
+  install_python: boolean;
+
+  // Web & SSL
+  install_nginx: boolean;
+  install_certbot: boolean;
+
+  // Native Database & Cache (Zero Docker)
+  database_engine: 'none' | 'postgresql' | 'mariadb' | 'mysql';
+  install_redis: boolean;
+}
+
+export interface ProvisionStep {
+  id: string;
+  label: string;
+  description: string;
+  command: string;
+}
+
+export interface ProvisionSessionInfo {
+  session_id: string;
+  server_id: string;
+  server_name: string;
+  steps: ProvisionStep[];
+}
+
+export interface ProvisionStepEvent {
+  session_id: string;
+  step_index: number;
+  step_id: string;
+  label: string;
+  status: 'running' | 'success' | 'failed' | 'skipped';
+  duration_ms: number;
+  exit_code?: number | null;
+}
+
+export interface ProvisionLogEvent {
+  session_id: string;
+  step_index: number;
+  text: string;
+  is_stderr: boolean;
+}
+
+export interface ProvisionCompleteEvent {
+  session_id: string;
+  server_id: string;
+  status: 'success' | 'failed' | 'aborted';
+  total_duration_ms: number;
+  error?: string | null;
+}
+
+export interface ProvisionRecord {
+  id: string;
+  server_id: string;
+  server_name?: string;
+  status: string;
+  logs: string;
+  started_at: string;
+  completed_at?: string | null;
+}
+
+
 
 

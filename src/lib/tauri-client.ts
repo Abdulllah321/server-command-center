@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload, ProvisionPlan, ProvisionSessionInfo, ProvisionStep, ProvisionRecord, NewServerDetails } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo, CronJobItem, SaveCronJobPayload, CronRunResult, MetricPoint, MetricsHistoryRange, ProcessItem, ProcessSortBy, SslCertificate, SslOverview, IssueCertPayload, ProvisionPlan, ProvisionSessionInfo, ProvisionStep, ProvisionRecord, NewServerDetails };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -1246,6 +1246,24 @@ export const killServerProcess = async (
     confirmationToken: confirmationToken || null,
   });
 };
+
+// Server Provisioning & Bootstrap Engine (Zero Docker)
+export const generateProvisionScript = async (plan: ProvisionPlan): Promise<string> => {
+  return await invoke('generate_provision_script', { plan });
+};
+
+export const startServerProvisioning = async (plan: ProvisionPlan): Promise<ProvisionSessionInfo> => {
+  return await invoke('start_server_provisioning', { plan });
+};
+
+export const cancelServerProvisioning = async (sessionId: string): Promise<void> => {
+  return await invoke('cancel_server_provisioning', { sessionId });
+};
+
+export const getProvisionHistory = async (serverId?: string): Promise<ProvisionRecord[]> => {
+  return await invoke('get_provision_history', { serverId: serverId || null });
+};
+
 
 
 

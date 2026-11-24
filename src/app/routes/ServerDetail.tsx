@@ -29,10 +29,12 @@ import {
   ShieldCheck,
   FileKey,
   Database,
-  CalendarClock
+  CalendarClock,
+  Wrench
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
+import { useUIStore } from '@/stores/use-ui-store';
 import { Pm2Table } from '@/features/pm2/components/Pm2Table';
 import { NginxManager } from '@/features/nginx/components/NginxManager';
 import { BackupsManager } from '@/features/backups/components/BackupsManager';
@@ -72,6 +74,7 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const openProvisionModal = useUIStore(s => s.openProvisionModal);
 
   const tabParam = searchParams.get('tab') || 'overview';
   const [activeTab, setActiveTab] = useState(tabParam);
@@ -316,6 +319,16 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
               >
                 <KeyRound className="h-3.5 w-3.5 mr-1.5" />
                 Quick Connect
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="h-8 text-xs border-primary/30 text-primary bg-primary/5 hover:bg-primary/10 hover:border-primary/60 px-3" 
+                onClick={() => openProvisionModal(id)}
+                title="Bootstrap or re-provision this server with native Linux runtimes"
+              >
+                <Wrench className="h-3.5 w-3.5 mr-1.5 text-primary" />
+                Provision Server
               </Button>
               <Button 
                 variant="outline" 

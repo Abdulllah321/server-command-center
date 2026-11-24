@@ -227,6 +227,10 @@ pub fn run() {
         commands::metrics::record_metric_point,
         commands::metrics::get_top_processes,
         commands::metrics::kill_server_process,
+        commands::provision::generate_provision_script,
+        commands::provision::start_server_provisioning,
+        commands::provision::cancel_server_provisioning,
+        commands::provision::get_provision_history,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])

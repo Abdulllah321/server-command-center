@@ -81,4 +81,5 @@ pub const ISSUE_SSL_CERTIFICATE: &str = "issue_ssl_certificate";
 pub const RENEW_SSL_CERTIFICATES: &str = "renew_ssl_certificates";
 pub const DELETE_SSL_CERTIFICATE: &str = "delete_ssl_certificate";
 pub const TOGGLE_SSL_AUTO_RENEWAL: &str = "toggle_ssl_auto_renewal";
+pub const PROVISION_SERVER: &str = "provision_server";
 
