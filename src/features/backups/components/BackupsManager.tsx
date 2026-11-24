@@ -22,6 +22,7 @@ import {
   deleteCloudConfig,
   testCloudStorageConnection,
   uploadBackupToCloud,
+  downloadBackupFromCloud,
   listServerDatabases,
   type BackupRecord, 
   type CreateBackupOptions,
@@ -145,6 +146,11 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const [uploadingBackup, setUploadingBackup] = useState<BackupRecord | null>(null);
   const [uploadCloudConfigId, setUploadCloudConfigId] = useState<string>('');
   const [uploadingToCloud, setUploadingToCloud] = useState(false);
+
+  // Cloud Inspection & Direct Download State
+  const [cloudDetailsModalOpen, setCloudDetailsModalOpen] = useState(false);
+  const [selectedCloudBackup, setSelectedCloudBackup] = useState<BackupRecord | null>(null);
+  const [downloadingCloudId, setDownloadingCloudId] = useState<string | null>(null);
 
   // --- Loaders ---
   const loadBackups = async () => {
@@ -620,10 +626,25 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
       });
       setUploadModalOpen(false);
       setUploadingBackup(null);
+      loadBackups();
     } catch (err: any) {
       toast.error('Failed to upload backup to cloud', { description: err.message || String(err) });
     } finally {
       setUploadingToCloud(false);
+    }
+  };
+
+  const handleDownloadFromCloud = async (backup: BackupRecord) => {
+    setDownloadingCloudId(backup.id);
+    try {
+      const res = await downloadBackupFromCloud(serverId, backup.id);
+      toast.success('Backup downloaded from cloud storage!', {
+        description: `Saved to ${res.local_path} (${formatBytes(res.bytes_written)})`,
+      });
+    } catch (err: any) {
+      toast.error('Failed to download backup from cloud', { description: err.message || String(err) });
+    } finally {
+      setDownloadingCloudId(null);
     }
   };
 
@@ -864,6 +885,20 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                                 <XCircle className="h-3 w-3" /> Failed
                               </span>
                             )}
+                            {b.cloud_uploaded && (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 font-medium hover:bg-sky-500/20 transition-colors"
+                                onClick={() => {
+                                  setSelectedCloudBackup(b);
+                                  setCloudDetailsModalOpen(true);
+                                }}
+                                title={b.cloud_remote_path ? `Stored in ${b.cloud_provider?.toUpperCase() || 'Cloud'}: ${b.cloud_remote_path}` : 'Safely Synced to Cloud'}
+                              >
+                                <Cloud className="h-3 w-3" />
+                                <span>{b.cloud_provider === 'dropbox' ? 'Dropbox' : b.cloud_provider === 's3' ? 'S3' : 'Cloud Synced'}</span>
+                              </button>
+                            )}
                           </div>
                           <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-2 font-mono">
                             <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground">
@@ -881,18 +916,52 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
 
                       {/* Actions Deck */}
                       <div className="flex items-center flex-wrap gap-2 self-end md:self-center">
-                        {/* Upload to Cloud */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs border-sky-500/30 bg-sky-500/5 dark:bg-sky-950/20 text-sky-700 dark:text-sky-300 hover:bg-sky-500/15"
-                          disabled={b.status !== 'success'}
-                          onClick={() => handleOpenUploadModal(b)}
-                          title="Upload directly to Amazon S3 or Dropbox"
-                        >
-                          <CloudUpload className="h-3.5 w-3.5 mr-1.5" />
-                          Push to Cloud
-                        </Button>
+                        {/* Cloud Action: See Cloud / From Cloud vs Push to Cloud */}
+                        {b.cloud_uploaded ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs border-sky-500/30 bg-sky-500/5 dark:bg-sky-950/20 text-sky-700 dark:text-sky-300 hover:bg-sky-500/15"
+                              onClick={() => {
+                                setSelectedCloudBackup(b);
+                                setCloudDetailsModalOpen(true);
+                              }}
+                              title="See offsite cloud backup location and replica details"
+                            >
+                              <Cloud className="h-3.5 w-3.5 mr-1.5 text-sky-500" />
+                              See Cloud
+                            </Button>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs border-indigo-500/30 bg-indigo-500/5 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/15"
+                              disabled={downloadingCloudId === b.id}
+                              onClick={() => handleDownloadFromCloud(b)}
+                              title="Download backup archive directly from offsite cloud storage to PC"
+                            >
+                              {downloadingCloudId === b.id ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                              ) : (
+                                <Download className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              {downloadingCloudId === b.id ? 'Downloading...' : 'From Cloud'}
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs border-sky-500/30 bg-sky-500/5 dark:bg-sky-950/20 text-sky-700 dark:text-sky-300 hover:bg-sky-500/15"
+                            disabled={b.status !== 'success'}
+                            onClick={() => handleOpenUploadModal(b)}
+                            title="Upload directly to Amazon S3 or Dropbox"
+                          >
+                            <CloudUpload className="h-3.5 w-3.5 mr-1.5" />
+                            Push to Cloud
+                          </Button>
+                        )}
 
                         {/* Download to Local PC */}
                         <Button
@@ -2324,6 +2393,23 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
               </div>
             </div>
 
+            {uploadingBackup?.cloud_uploaded && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4" />
+                  <span>Already Synced to Cloud</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  This backup is already stored in <span className="font-mono text-foreground uppercase">{uploadingBackup.cloud_provider || 'cloud'}</span>. Uploading again will overwrite the remote cloud archive.
+                </p>
+                {uploadingBackup.cloud_remote_path && (
+                  <div className="p-1.5 rounded bg-background/80 border border-border font-mono text-[10px] break-all text-sky-600 dark:text-sky-400">
+                    {uploadingBackup.cloud_remote_path}
+                  </div>
+                )}
+              </div>
+            )}
+
             {cloudConfigs.length === 0 ? (
               <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400">
                 No cloud storage accounts configured. Please add an S3 or Dropbox account in the "Cloud Storage" tab first.
@@ -2354,12 +2440,112 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
               type="button" 
               onClick={handleUploadBackupToCloud} 
               disabled={uploadingToCloud || cloudConfigs.length === 0} 
-              className="bg-sky-600 hover:bg-sky-500 text-white font-medium"
+              className={uploadingBackup?.cloud_uploaded ? "bg-amber-600 hover:bg-amber-500 text-white font-medium" : "bg-sky-600 hover:bg-sky-500 text-white font-medium"}
             >
               {uploadingToCloud ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CloudUpload className="h-4 w-4 mr-2" />}
-              {uploadingToCloud ? 'Streaming to Cloud...' : 'Upload Now'}
+              {uploadingToCloud ? 'Streaming to Cloud...' : uploadingBackup?.cloud_uploaded ? 'Re-upload / Overwrite' : 'Upload Now'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========================================================================= */}
+      {/* MODAL: SEE CLOUD BACKUP DETAILS & DIRECT DOWNLOAD                         */}
+      {/* ========================================================================= */}
+      <Dialog open={cloudDetailsModalOpen} onOpenChange={setCloudDetailsModalOpen}>
+        <DialogContent className="max-w-md bg-card border-border text-foreground">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground">
+              <Cloud className="h-5 w-5 text-sky-500" />
+              Offsite Cloud Backup Details
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground text-xs">
+              Verified offsite cloud replica for {selectedCloudBackup?.target}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedCloudBackup && (
+            <div className="space-y-4 pt-2">
+              <div className="p-3.5 bg-muted/40 rounded-xl border border-border space-y-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Storage Provider</span>
+                  <Badge variant="outline" className="text-[10px] font-mono uppercase bg-background font-semibold">
+                    {selectedCloudBackup.cloud_provider === 's3' ? '🪣 Amazon S3 / Compatible' : '📦 Dropbox'}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Offsite Status</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> Safely Stored in Cloud
+                  </span>
+                </div>
+                {selectedCloudBackup.cloud_uploaded_at && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Uploaded At</span>
+                    <span className="font-mono text-[11px] text-foreground">
+                      {new Date(selectedCloudBackup.cloud_uploaded_at).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-border">
+                  <span className="text-muted-foreground block text-[11px] mb-1 font-medium">Remote Cloud Object Location:</span>
+                  <div className="p-2 rounded bg-background border border-border font-mono text-[11px] break-all text-sky-600 dark:text-sky-400 select-all">
+                    {selectedCloudBackup.cloud_remote_path || 'Configured via remote automated schedule'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <Button
+                  type="button"
+                  variant="default"
+                  size="sm"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white w-full h-9 font-medium"
+                  disabled={downloadingCloudId === selectedCloudBackup.id}
+                  onClick={() => {
+                    handleDownloadFromCloud(selectedCloudBackup);
+                    setCloudDetailsModalOpen(false);
+                  }}
+                >
+                  {downloadingCloudId === selectedCloudBackup.id ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  {downloadingCloudId === selectedCloudBackup.id ? 'Downloading from Cloud...' : 'Download from Cloud to PC'}
+                </Button>
+
+                {selectedCloudBackup.cloud_remote_path && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs h-8"
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedCloudBackup.cloud_remote_path!);
+                      toast.success('Cloud remote path copied to clipboard!');
+                    }}
+                  >
+                    Copy Cloud URI
+                  </Button>
+                )}
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 h-8"
+                  onClick={() => {
+                    setCloudDetailsModalOpen(false);
+                    handleOpenUploadModal(selectedCloudBackup);
+                  }}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1.5" />
+                  Re-upload / Overwrite in Cloud...
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

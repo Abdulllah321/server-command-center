@@ -327,6 +327,10 @@ export interface BackupRecord {
   size_bytes: number | null;
   status: string;
   created_at: string;
+  cloud_uploaded?: boolean;
+  cloud_provider?: string | null;
+  cloud_remote_path?: string | null;
+  cloud_uploaded_at?: string | null;
 }
 
 export interface CreateBackupOptions {
@@ -367,6 +371,18 @@ export const downloadBackup = async (
   targetLocalDir?: string
 ): Promise<DownloadBackupResult> => {
   return await invoke('download_backup', {
+    serverId,
+    backupId,
+    targetLocalDir: targetLocalDir ?? null,
+  });
+};
+
+export const downloadBackupFromCloud = async (
+  serverId: string,
+  backupId: string,
+  targetLocalDir?: string
+): Promise<DownloadBackupResult> => {
+  return await invoke('download_backup_from_cloud', {
     serverId,
     backupId,
     targetLocalDir: targetLocalDir ?? null,

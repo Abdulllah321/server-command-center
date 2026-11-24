@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.2';
+export const APP_VERSION = '1.2.3';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,26 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.3': {
+    summary: 'Cloud sync tracking, offsite cloud replica inspection ("See Cloud"), direct cloud downloads, and duplicate upload prevention.',
+    highlights: [
+      'Cloud Sync Tracking: Backup records now track offsite sync status, cloud provider (Amazon S3 / Dropbox), remote object URI, and timestamp.',
+      'Offsite Cloud Inspection ("See Cloud"): Dedicated modal displays cloud storage location, provider details, and 1-click cloud URI copy.',
+      'Direct Download from Cloud: Stream backup archives directly from Amazon S3 / Dropbox straight to your local PC downloads folder over secure SSH channels.',
+      'Duplicate Upload Prevention: Backups already pushed to cloud feature prominent status badges and require deliberate confirmation before re-uploading, preventing accidental duplicate offsite copies.',
+      'Retroactive Detection: Automatically detects and surfaces past cloud uploads from activity logs for seamless backward compatibility.'
+    ],
+    features: [
+      'Cloud Download Command: Native backend command `download_backup_from_cloud` streams S3 and Dropbox objects straight to local storage.',
+      'Cloud Metadata Migration: SQLite schema migration `0007_backup_cloud_metadata` tracks `cloud_uploaded`, `cloud_provider`, `cloud_remote_path`, and `cloud_uploaded_at`.'
+    ],
+    fixes: [
+      'Eliminated duplicate cloud uploads by replacing blind "Push to Cloud" buttons with "See Cloud" and "From Cloud" actions for synced archives.'
+    ],
+    performance: [
+      'Zero-RAM streaming download from cloud storage providers directly to local disk without buffering large archives in memory.'
+    ]
+  },
   'v1.2.2': {
     summary: 'Automated database discovery and dropdown selection across PostgreSQL, MySQL/MariaDB, and Redis for ad-hoc dumps and scheduled server backups.',
     highlights: [

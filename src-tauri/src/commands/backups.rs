@@ -23,6 +23,14 @@ pub struct BackupRecord {
     pub size_bytes: Option<i64>,
     pub status: String,
     pub created_at: String,
+    #[serde(default)]
+    pub cloud_uploaded: bool,
+    #[serde(default)]
+    pub cloud_provider: Option<String>,
+    #[serde(default)]
+    pub cloud_remote_path: Option<String>,
+    #[serde(default)]
+    pub cloud_uploaded_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,13 +132,15 @@ pub async fn list_backups(
 ) -> CommandResult<Vec<BackupRecord>> {
     let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
     let mut stmt = conn.prepare(
-        "SELECT id, server_id, target, destination, size_bytes, status, created_at
+        "SELECT id, server_id, target, destination, size_bytes, status, created_at,
+                cloud_uploaded, cloud_provider, cloud_remote_path, cloud_uploaded_at
          FROM backups
          WHERE server_id = ?1
          ORDER BY created_at DESC"
     ).map_err(|e| CommandError::Database(e.to_string()))?;
 
     let rows = stmt.query_map([&server_id], |row| {
+        let is_uploaded_val: i32 = row.get(7).unwrap_or(0);
         Ok(BackupRecord {
             id: row.get(0)?,
             server_id: row.get(1)?,
@@ -139,12 +149,41 @@ pub async fn list_backups(
             size_bytes: row.get(4)?,
             status: row.get(5)?,
             created_at: row.get(6)?,
+            cloud_uploaded: is_uploaded_val == 1,
+            cloud_provider: row.get(8).unwrap_or(None),
+            cloud_remote_path: row.get(9).unwrap_or(None),
+            cloud_uploaded_at: row.get(10).unwrap_or(None),
         })
     }).map_err(|e| CommandError::Database(e.to_string()))?;
 
     let mut results = Vec::new();
     for r in rows {
-        if let Ok(item) = r {
+        if let Ok(mut item) = r {
+            // Retroactively detect cloud sync from activity log if not flagged in DB yet
+            if !item.cloud_uploaded {
+                if let Ok(mut act_stmt) = conn.prepare(
+                    "SELECT detail, created_at FROM activity_log 
+                     WHERE action = ?1 AND target = ?2 AND status = 'success' 
+                     ORDER BY rowid DESC LIMIT 1"
+                ) {
+                    if let Ok(row) = act_stmt.query_row(rusqlite::params![actions::UPLOAD_BACKUP_CLOUD, item.destination], |r| {
+                        Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+                    }) {
+                        if let Some(detail) = row.0 {
+                            item.cloud_uploaded = true;
+                            if detail.to_lowercase().contains("dropbox") {
+                                item.cloud_provider = Some("dropbox".into());
+                            } else {
+                                item.cloud_provider = Some("s3".into());
+                            }
+                            if let Some(idx) = detail.find("at ") {
+                                item.cloud_remote_path = Some(detail[idx + 3..].trim().to_string());
+                            }
+                            item.cloud_uploaded_at = row.1;
+                        }
+                    }
+                }
+            }
             results.push(item);
         }
     }
@@ -494,6 +533,10 @@ fi
         size_bytes,
         status: status.into(),
         created_at: now_iso,
+        cloud_uploaded: false,
+        cloud_provider: None,
+        cloud_remote_path: None,
+        cloud_uploaded_at: None,
     })
 }
 
@@ -1832,6 +1875,7 @@ pub async fn run_backup_schedule_now(
                     );
                 }
 
+                let is_cloud = sched.storage_provider != "none";
                 created_backup_record = Some(BackupRecord {
                     id: backup_id,
                     server_id: target_server_id.clone(),
@@ -1840,6 +1884,10 @@ pub async fn run_backup_schedule_now(
                     size_bytes: size,
                     status: "success".into(),
                     created_at: now_iso.clone(),
+                    cloud_uploaded: is_cloud,
+                    cloud_provider: if is_cloud { Some(sched.storage_provider.clone()) } else { None },
+                    cloud_remote_path: None,
+                    cloud_uploaded_at: if is_cloud { Some(now_iso.clone()) } else { None },
                 });
             }
         }
@@ -2237,6 +2285,17 @@ fi"#,
 
         {
             let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+            let now_iso = chrono::Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "UPDATE backups 
+                 SET cloud_uploaded = 1,
+                     cloud_provider = 'dropbox',
+                     cloud_remote_path = ?1,
+                     cloud_uploaded_at = ?2
+                 WHERE id = ?3",
+                rusqlite::params![remote_path, now_iso, backup_id],
+            );
+
             log_activity(&conn, ActivityEntry {
                 server_id: Some(server_id),
                 action: actions::UPLOAD_BACKUP_CLOUD.into(),
@@ -2399,6 +2458,17 @@ fi"#,
 
         {
             let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+            let now_iso = chrono::Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "UPDATE backups 
+                 SET cloud_uploaded = 1,
+                     cloud_provider = 's3',
+                     cloud_remote_path = ?1,
+                     cloud_uploaded_at = ?2
+                 WHERE id = ?3",
+                rusqlite::params![remote_path, now_iso, backup_id],
+            );
+
             log_activity(&conn, ActivityEntry {
                 server_id: Some(server_id),
                 action: actions::UPLOAD_BACKUP_CLOUD.into(),
@@ -2686,4 +2756,258 @@ run_query
     }
 
     Ok(dbs)
+}
+
+#[tauri::command]
+pub async fn download_backup_from_cloud(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: String,
+    backup_id: String,
+    target_local_dir: Option<String>,
+) -> CommandResult<DownloadBackupResult> {
+    let start_time = Instant::now();
+
+    // 1. Fetch backup details from DB
+    let (destination, provider, remote_path) = {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT destination, cloud_provider, cloud_remote_path FROM backups WHERE id = ?1 AND server_id = ?2"
+        ).map_err(|e| CommandError::Database(e.to_string()))?;
+
+        stmt.query_row([&backup_id, &server_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<String>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        }).map_err(|_| CommandError::NotFound(format!("Backup {} not found", backup_id)))?
+    };
+
+    let target_provider = provider.unwrap_or_else(|| "s3".into());
+    let remote_path = remote_path.ok_or_else(|| {
+        CommandError::Validation("This backup has not been uploaded to cloud storage yet".into())
+    })?;
+
+    // 2. Fetch cloud config matching provider
+    let config_json = {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT config_json FROM cloud_storage_configs WHERE provider = ?1 ORDER BY updated_at DESC LIMIT 1"
+        ).map_err(|e| CommandError::Database(e.to_string()))?;
+        stmt.query_row([&target_provider], |r| r.get::<_, String>(0))
+            .map_err(|_| CommandError::NotFound(format!("No saved cloud storage configuration found for provider '{}'", target_provider)))?
+    };
+
+    // 3. Resolve local target file path
+    let filename = std::path::Path::new(&destination)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("cloud_backup.tar.gz");
+
+    let local_dir = if let Some(custom) = target_local_dir.filter(|s| !s.trim().is_empty()) {
+        std::path::PathBuf::from(custom)
+    } else {
+        app_handle.path().download_dir()
+            .map_err(|e| CommandError::Internal(format!("Failed to locate downloads folder: {}", e)))?
+    };
+
+    tokio::fs::create_dir_all(&local_dir).await
+        .map_err(|e| CommandError::Internal(format!("Failed to create directory {:?}: {}", local_dir, e)))?;
+
+    let local_file_path = local_dir.join(filename);
+
+    // 4. Acquire pooled SSH session to execute streaming download
+    let session_arc = state.session_manager
+        .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+
+    // 5. Build streaming download command
+    let download_cmd = if target_provider == "dropbox" {
+        let v: serde_json::Value = serde_json::from_str(&config_json)
+            .map_err(|e| CommandError::Validation(format!("Invalid Dropbox JSON config: {}", e)))?;
+        let token = v["access_token"].as_str().unwrap_or("").trim();
+        let target_path = if remote_path.starts_with('/') { remote_path.clone() } else { format!("/{}", remote_path) };
+
+        format!(
+            r#"curl -s -X POST https://content.dropboxapi.com/2/files/download \
+  --header "Authorization: Bearer {}" \
+  --header "Dropbox-API-Arg: {{\"path\": \"{}\"}}""#,
+            escape_bash(token),
+            escape_bash(&target_path)
+        )
+    } else {
+        let v: serde_json::Value = serde_json::from_str(&config_json)
+            .map_err(|e| CommandError::Validation(format!("Invalid S3 JSON config: {}", e)))?;
+        let bucket = v["bucket"].as_str().unwrap_or("").trim();
+        let region = v["region"].as_str().unwrap_or("us-east-1").trim();
+        let endpoint = v["endpoint"].as_str().unwrap_or("").trim();
+        let akey = v["access_key_id"].as_str().or_else(|| v["access_key"].as_str()).unwrap_or("").trim();
+        let skey = v["secret_access_key"].as_str().or_else(|| v["secret_key"].as_str()).unwrap_or("").trim();
+
+        let key = if let Some(stripped) = remote_path.strip_prefix(&format!("s3://{}/", bucket)) {
+            stripped.to_string()
+        } else if let Some(stripped) = remote_path.strip_prefix("s3://") {
+            stripped.split_once('/').map(|x| x.1).unwrap_or(stripped).to_string()
+        } else {
+            remote_path.trim_start_matches('/').to_string()
+        };
+
+        let py_script = format!(
+            r#"import sys, os, datetime, hashlib, hmac, urllib.request
+
+bucket = "{bucket}"
+region = "{region}"
+endpoint = "{endpoint}"
+access_key = "{akey}"
+secret_key = "{skey}"
+key = "{key}"
+
+proto = "https"
+if not endpoint:
+    if region in ("us-east-1", ""):
+        host = f"{{bucket}}.s3.amazonaws.com"
+    else:
+        host = f"{{bucket}}.s3.{{region}}.amazonaws.com"
+    url = f"https://{{host}}/{{key}}"
+    canonical_uri = f"/{{key}}"
+else:
+    clean_ep = endpoint.replace("https://", "").replace("http://", "").rstrip("/")
+    proto = "https" if "https" in endpoint else "http"
+    host = clean_ep
+    url = f"{{proto}}://{{host}}/{{bucket}}/{{key}}"
+    canonical_uri = f"/{{bucket}}/{{key}}"
+
+now = datetime.datetime.now(datetime.timezone.utc)
+amz_date = now.strftime('%Y%m%dT%H%M%SZ')
+date_stamp = now.strftime('%Y%m%d')
+
+payload_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+canonical_headers = f"host:{{host}}\nx-amz-content-sha256:{{payload_hash}}\nx-amz-date:{{amz_date}}\n"
+signed_headers = "host;x-amz-content-sha256;x-amz-date"
+canonical_request = f"GET\n{{canonical_uri}}\n\n{{canonical_headers}}\n{{signed_headers}}\n{{payload_hash}}"
+
+algorithm = "AWS4-HMAC-SHA256"
+effective_region = region if region else "us-east-1"
+credential_scope = f"{{date_stamp}}/{{effective_region}}/s3/aws4_request"
+string_to_sign = f"{{algorithm}}\n{{amz_date}}\n{{credential_scope}}\n{{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}}"
+
+def sign(k, m):
+    return hmac.new(k, m.encode('utf-8'), hashlib.sha256).digest()
+
+k_date = sign(('AWS4' + secret_key).encode('utf-8'), date_stamp)
+k_region = sign(k_date, effective_region)
+k_service = sign(k_region, "s3")
+k_signing = sign(k_service, "aws4_request")
+signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+
+auth_header = f"{{algorithm}} Credential={{access_key}}/{{credential_scope}}, SignedHeaders={{signed_headers}}, Signature={{signature}}"
+
+req = urllib.request.Request(url, method="GET")
+req.add_header("Host", host)
+req.add_header("x-amz-date", amz_date)
+req.add_header("x-amz-content-sha256", payload_hash)
+req.add_header("Authorization", auth_header)
+
+with urllib.request.urlopen(req, timeout=1800) as resp:
+    while True:
+        chunk = resp.read(1048576)
+        if not chunk:
+            break
+        sys.stdout.buffer.write(chunk)
+"#,
+            bucket = bucket.replace('\\', "\\\\").replace('"', "\\\""),
+            region = region.replace('\\', "\\\\").replace('"', "\\\""),
+            endpoint = endpoint.replace('\\', "\\\\").replace('"', "\\\""),
+            akey = akey.replace('\\', "\\\\").replace('"', "\\\""),
+            skey = skey.replace('\\', "\\\\").replace('"', "\\\""),
+            key = key.replace('\\', "\\\\").replace('"', "\\\"")
+        );
+        let py_b64 = b64.encode(py_script.as_bytes());
+
+        format!(
+            r#"BUCKET="{bucket}"
+KEY="{key}"
+ENDPOINT="{endpoint}"
+AKEY="{akey}"
+SKEY="{skey}"
+REGION="{region}"
+
+if command -v aws >/dev/null 2>&1; then
+    ENDPOINT_FLAG=""
+    [ -n "$ENDPOINT" ] && ENDPOINT_FLAG="--endpoint-url $ENDPOINT"
+    AWS_ACCESS_KEY_ID="$AKEY" AWS_SECRET_ACCESS_KEY="$SKEY" AWS_DEFAULT_REGION="$REGION" \
+    aws s3 cp "s3://${{BUCKET}}/${{KEY}}" - $ENDPOINT_FLAG
+else
+    python3 -c "import base64; exec(base64.b64decode('{py_b64}').decode('utf-8'))"
+fi"#,
+            bucket = escape_bash(bucket),
+            key = escape_bash(&key),
+            endpoint = escape_bash(endpoint),
+            akey = escape_bash(akey),
+            skey = escape_bash(skey),
+            region = escape_bash(region),
+            py_b64 = py_b64
+        )
+    };
+
+    // 6. Stream via SSH channel directly into local file
+    let mut file = tokio::fs::File::create(&local_file_path).await
+        .map_err(|e| CommandError::Internal(format!("Failed to create local file {:?}: {}", local_file_path, e)))?;
+
+    let mut bytes_written: u64 = 0;
+    {
+        let session = session_arc.lock().await;
+        let mut channel = session.channel_open_session().await
+            .map_err(|e| CommandError::Internal(format!("Failed to open SSH channel: {}", e)))?;
+
+        channel.exec(true, download_cmd.as_str()).await
+            .map_err(|e| CommandError::Internal(format!("Failed to start cloud download stream over SSH: {}", e)))?;
+
+        loop {
+            match channel.wait().await {
+                Some(ChannelMsg::Data { ref data }) => {
+                    file.write_all(data).await
+                        .map_err(|e| CommandError::Internal(format!("Failed writing to local file: {}", e)))?;
+                    bytes_written += data.len() as u64;
+                }
+                Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                    let err_str = String::from_utf8_lossy(data);
+                    if !err_str.trim().is_empty() {
+                        eprintln!("Cloud download remote stderr: {}", err_str);
+                    }
+                }
+                Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let _ = channel.close().await;
+    }
+    file.flush().await
+        .map_err(|e| CommandError::Internal(format!("Failed to flush downloaded cloud backup: {}", e)))?;
+
+    if bytes_written == 0 {
+        let _ = tokio::fs::remove_file(&local_file_path).await;
+        return Err(CommandError::Internal("Cloud backup download returned 0 bytes. Please verify cloud credentials and object path.".into()));
+    }
+
+    // 7. Audit log
+    {
+        let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
+        log_activity(&conn, ActivityEntry {
+            server_id: Some(server_id),
+            action: actions::DOWNLOAD_BACKUP.into(),
+            target: Some(remote_path.clone()),
+            status: "success".into(),
+            detail: Some(format!("Downloaded backup from cloud ({}) to {:?} ({} bytes)", target_provider, local_file_path, bytes_written)),
+            duration_ms: Some(start_time.elapsed().as_millis() as i64),
+        });
+    }
+
+    Ok(DownloadBackupResult {
+        local_path: local_file_path.to_string_lossy().to_string(),
+        bytes_written,
+    })
 }
