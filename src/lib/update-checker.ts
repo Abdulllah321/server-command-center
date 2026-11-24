@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.4';
+export const APP_VERSION = '1.2.5';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,21 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.5': {
+    summary: 'Environment Variables & Secrets Deck: Zero-daemon remote .env discovery, sensitive credential masking, versioned auto-backups, instant rollback, and cross-environment diffing.',
+    highlights: [
+      'Automated .env File Discovery: Scans active applications and common server roots (/var/www, /home, /root, PM2 app directories) to instantly surface all environment configuration files.',
+      'Sensitive Credential Masking: Automatically identifies and masks secret credentials (passwords, tokens, API keys, private certs, connection strings) with individual and master eye toggles.',
+      'Versioned Automated Backups: Every save automatically creates a timestamped backup snapshot (.bak.<timestamp>) on the remote server with safe atomic writing via base64 decoders.',
+      'One-Click Rollback Drawer: View complete history of past .env snapshots and roll back to any previous state in a single click (with automatic pre-rollback safety snapshot).',
+      'Cross-Environment Diff & Comparison: Compare .env files side-by-side across staging, production, or different servers with missing key highlights and 1-click key importing.',
+      'Structured Table & Raw Code Modes: Switch between a classified key-value table (Database, Secret, Network, Config) and a raw syntax-highlighted editor with zero sync friction.'
+    ],
+    features: [
+      'Native Backend Commands: `list_server_env_files`, `read_env_file`, `save_env_file`, `list_env_backups`, and `restore_env_backup` running over pooled SSH channels.',
+      'Zero Secret Leakage Audit: State mutations are securely logged in the Activity Log with sensitive values completely redacted.'
+    ]
+  },
   'v1.2.4': {
     summary: 'Full desktop-class remote SFTP File Explorer: move, cut-copy-paste, duplicate in place, compress, archive extraction, native drag-and-drop, and custom context menu.',
     highlights: [

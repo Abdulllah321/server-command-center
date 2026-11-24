@@ -400,5 +400,39 @@ export interface UploadFileChunkPayload {
   base64_chunk?: string;
 }
 
+export interface EnvFileEntry {
+  path: string;
+  filename: string;
+  size: number;
+  modified: number;
+  app_name?: string | null;
+}
+
+export interface EnvVariableItem {
+  key: string;
+  value: string;
+  raw_line: string;
+  comment?: string | null;
+  is_secret: boolean;
+  line_number: number;
+}
+
+export interface EnvBackupEntry {
+  backup_path: string;
+  filename: string;
+  size: number;
+  modified: number;
+  timestamp_str: string;
+}
+
+export interface EnvFileDetails {
+  path: string;
+  raw_content: string;
+  items: EnvVariableItem[];
+  modified: number;
+  size: number;
+  backups: EnvBackupEntry[];
+}
+
 
 

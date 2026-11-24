@@ -204,6 +204,11 @@ pub fn run() {
         commands::files::duplicate_remote_path,
         commands::files::compress_remote_paths,
         commands::files::extract_remote_archive,
+        commands::env_vars::list_server_env_files,
+        commands::env_vars::read_env_file,
+        commands::env_vars::save_env_file,
+        commands::env_vars::list_env_backups,
+        commands::env_vars::restore_env_backup,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])

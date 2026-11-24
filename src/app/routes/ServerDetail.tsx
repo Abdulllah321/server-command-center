@@ -26,7 +26,8 @@ import {
   Check,
   Network,
   FolderTree,
-  ShieldCheck
+  ShieldCheck,
+  FileKey
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
@@ -42,6 +43,7 @@ import { ServerConnectionBanner } from '@/features/servers/components/ServerConn
 import { QuickConnectModal } from '@/features/servers/components/QuickConnectModal';
 import { LogViewer } from '@/features/logs/components/LogViewer';
 import { ServerRebuildDeck } from '@/features/rebuild/components/ServerRebuildDeck';
+import { EnvManager } from '@/features/env/components/EnvManager';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -187,6 +189,13 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
       icon: FolderTree, 
       accentColor: 'text-blue-400', 
       accentBg: 'bg-blue-400' 
+    },
+    { 
+      id: 'env', 
+      label: 'Env & Secrets', 
+      icon: FileKey, 
+      accentColor: 'text-emerald-400', 
+      accentBg: 'bg-emerald-400' 
     },
     { 
       id: 'terminal', 
@@ -492,6 +501,18 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
           )}
         >
           <FileManager serverId={id!} />
+        </TabsContent>
+
+        {/* Tab 5.5: Env & Secrets Deck */}
+        <TabsContent 
+          value="env" 
+          keepMounted 
+          className={cn(
+            "flex-1 min-h-0 h-full mt-6 flex flex-col",
+            activeTab !== 'env' && "!hidden"
+          )}
+        >
+          <EnvManager serverId={id!} />
         </TabsContent>
 
         {/* Tab 6: Terminal */}

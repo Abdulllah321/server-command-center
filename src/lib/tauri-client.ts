@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -953,6 +953,27 @@ export const compressRemotePaths = async (serverId: string, sourcePaths: string[
 
 export const extractRemoteArchive = async (serverId: string, archivePath: string, destinationDir: string): Promise<void> => {
   return await invoke('extract_remote_archive', { serverId, archivePath, destinationDir });
+};
+
+// Environment Variables & Secrets
+export const listServerEnvFiles = async (serverId: string, customPaths?: string[]): Promise<EnvFileEntry[]> => {
+  return await invoke('list_server_env_files', { serverId, customPaths: customPaths || null });
+};
+
+export const readEnvFile = async (serverId: string, filePath: string): Promise<EnvFileDetails> => {
+  return await invoke('read_env_file', { serverId, filePath });
+};
+
+export const saveEnvFile = async (serverId: string, filePath: string, content: string, createBackup: boolean = true): Promise<string> => {
+  return await invoke('save_env_file', { serverId, filePath, content, createBackup });
+};
+
+export const listEnvBackups = async (serverId: string, filePath: string): Promise<EnvBackupEntry[]> => {
+  return await invoke('list_env_backups', { serverId, filePath });
+};
+
+export const restoreEnvBackup = async (serverId: string, filePath: string, backupPath: string): Promise<void> => {
+  return await invoke('restore_env_backup', { serverId, filePath, backupPath });
 };
 
 export interface InstallUpdatePayload {

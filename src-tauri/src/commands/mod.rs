@@ -22,5 +22,6 @@ pub mod scheduled_rebuilds;
 pub mod files;
 pub mod security_audit;
 pub mod updater;
+pub mod env_vars;
 
 
