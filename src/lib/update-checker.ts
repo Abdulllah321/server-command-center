@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.2.2';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,26 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.2': {
+    summary: 'Automated database discovery and dropdown selection across PostgreSQL, MySQL/MariaDB, and Redis for ad-hoc dumps and scheduled server backups.',
+    highlights: [
+      'Automated Database Discovery: Remote Linux servers and Docker containers are queried live over pooled SSH connections to discover all available databases.',
+      'Dropdown DB Selection: Replaced manual database text input with an interactive selection dropdown displaying engine icons (🐘 PostgreSQL, 🐬 MySQL, ⚡ Redis).',
+      'Intelligent Primary Database Pre-Selection: Automatically detects and selects your primary application database so you can create dumps in 1 click.',
+      'Docker & Root Peer Auth Auto-Detection: Discovers databases running natively via peer socket or inside PostgreSQL/MySQL/Redis Docker containers without manual configuration.',
+      'Seamless Fallback & Re-scan: Full support for custom database names, unlisted schemas, and instant 1-click live server re-scan.'
+    ],
+    features: [
+      'Database Discovery Command: Native backend command `list_server_databases` inspects `pg_database`, `information_schema.schemata`, and Redis keyspaces.',
+      'Dual Modal Integration: Dropdown selection integrated into both the Ad-hoc Live Dump modal and the Server-Native Cron Schedule modal.'
+    ],
+    fixes: [
+      'Eliminated manual database typing requirement for server dumps and cron backup schedules.'
+    ],
+    performance: [
+      'Ultra-fast sub-second database inspection reusing persistent pooled SSH channels without launching separate daemon processes.'
+    ]
+  },
   'v1.2.1': {
     summary: 'Isolated internal SPA routes from external link interceptor, ensuring internal navigation (dashboard, servers, tabs, settings) stays seamlessly inside the app.',
     highlights: [

@@ -156,6 +156,7 @@ pub fn run() {
         commands::backups::list_cloud_configs,
         commands::backups::save_cloud_config,
         commands::backups::delete_cloud_config,
+        commands::backups::list_server_databases,
         commands::tunnels::start_port_tunnel,
         commands::tunnels::stop_port_tunnel,
         commands::tunnels::list_active_tunnels,

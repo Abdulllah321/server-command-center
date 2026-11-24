@@ -509,6 +509,31 @@ export const deleteCloudConfig = async (id: string): Promise<void> => {
   return await invoke('delete_cloud_config', { id });
 };
 
+export interface ListServerDatabasesOptions {
+  target_type?: string;
+  db_user?: string;
+  db_password?: string;
+  db_host?: string;
+  db_port?: number;
+  server_id?: string;
+  serverId?: string;
+}
+
+export const listServerDatabases = async (
+  serverId: string,
+  options?: ListServerDatabasesOptions
+): Promise<string[]> => {
+  return await invoke('list_server_databases', {
+    serverId,
+    server_id: serverId,
+    options: {
+      ...options,
+      server_id: serverId,
+      serverId,
+    },
+  });
+};
+
 // Port Tunnels & Local Forwarding
 export interface PortTunnelInfo {
   id: string;

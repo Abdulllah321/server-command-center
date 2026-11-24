@@ -2493,3 +2493,197 @@ pub async fn delete_cloud_config(
         .map_err(|e| CommandError::Database(e.to_string()))?;
     Ok(())
 }
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ListServerDatabasesOptions {
+    #[serde(default)]
+    pub target_type: Option<String>,
+    #[serde(default)]
+    pub db_user: Option<String>,
+    #[serde(default)]
+    pub db_password: Option<String>,
+    #[serde(default)]
+    pub db_host: Option<String>,
+    #[serde(default)]
+    pub db_port: Option<u16>,
+    #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default, rename = "serverId")]
+    pub server_id_camel: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_server_databases(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    server_id: Option<String>,
+    options: Option<ListServerDatabasesOptions>,
+) -> CommandResult<Vec<String>> {
+    let effective_server_id = server_id
+        .or_else(|| options.as_ref().and_then(|o| o.server_id.clone()))
+        .or_else(|| options.as_ref().and_then(|o| o.server_id_camel.clone()))
+        .ok_or_else(|| CommandError::Validation("server_id is required".into()))?;
+
+    let session_arc = state.session_manager
+        .get_or_connect(effective_server_id.clone(), state.db.clone(), app_handle.clone())
+        .await?;
+    let mut session = session_arc.lock().await;
+
+    let target_type = options.as_ref()
+        .and_then(|o| o.target_type.as_deref())
+        .unwrap_or("postgres");
+    let user = options.as_ref().and_then(|o| o.db_user.as_deref()).unwrap_or("").trim();
+    let pass = options.as_ref().and_then(|o| o.db_password.as_deref()).unwrap_or("").trim();
+    let host = options.as_ref().and_then(|o| o.db_host.as_deref()).unwrap_or("").trim();
+    let port = options.as_ref().and_then(|o| o.db_port);
+
+    let script = match target_type {
+        "mysql" => {
+            let port_num = port.unwrap_or(3306);
+            format!(
+                r#"bash -c '
+USER="{user}"
+PASS="{pass}"
+HOST="{host}"
+PORT="{port_num}"
+
+run_query() {{
+    if [ -n "$PASS" ]; then
+        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
+    fi
+
+    if [ -f /etc/mysql/debian.cnf ]; then
+        mysql --defaults-file=/etc/mysql/debian.cnf -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        if sudo mysql -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        DOCKER_MYSQL=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "mysql|mariadb" | awk "{{print \$1}}" | head -n 1)
+        if [ -n "$DOCKER_MYSQL" ]; then
+            docker exec "$DOCKER_MYSQL" mysql -u "${{USER:-root}}" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
+        fi
+    fi
+
+    mysql -u "${{USER:-root}}" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null || true
+}}
+
+run_query
+'
+"#
+            )
+        },
+        "redis" => {
+            format!(
+                r#"bash -c '
+run_query() {{
+    if command -v redis-cli >/dev/null 2>&1; then
+        redis-cli INFO keyspace 2>/dev/null | grep -E "^db[0-9]+" | cut -d: -f1 || true
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        DOCKER_REDIS=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "redis" | awk "{{print \$1}}" | head -n 1)
+        if [ -n "$DOCKER_REDIS" ]; then
+            docker exec "$DOCKER_REDIS" redis-cli INFO keyspace 2>/dev/null | grep -E "^db[0-9]+" | cut -d: -f1 || true
+        fi
+    fi
+}}
+
+run_query
+'
+"#
+            )
+        },
+        _ => {
+            let port_num = port.unwrap_or(5432);
+            format!(
+                r#"bash -c '
+USER="{user}"
+PASS="{pass}"
+HOST="{host}"
+PORT="{port_num}"
+
+run_query() {{
+    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
+        export PGPASSWORD="$PASS"
+        H_ARG=""
+        [ -n "$HOST" ] && H_ARG="-h $HOST"
+        U_ARG=""
+        [ -n "$USER" ] && U_ARG="-U $USER"
+        psql $H_ARG -p "$PORT" $U_ARG -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
+    fi
+
+    if [ -n "$USER" ]; then
+        if [ "$(id -u)" -eq 0 ] && id -u "$USER" >/dev/null 2>&1; then
+            sudo -u "$USER" psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
+        elif psql -U "$USER" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        if id -u postgres >/dev/null 2>&1; then
+            sudo -u postgres psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
+        elif su - postgres -c "psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;\"" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    if psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null; then
+        return 0
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        DOCKER_PG=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "postgres|timescale" | awk "{{print \$1}}" | head -n 1)
+        if [ -n "$DOCKER_PG" ]; then
+            U_NAME="${{USER:-postgres}}"
+            docker exec "$DOCKER_PG" psql -U "$U_NAME" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
+        fi
+    fi
+
+    psql -U "${{USER:-postgres}}" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null || true
+}}
+
+run_query
+'
+"#
+            )
+        }
+    };
+
+    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(15)).await?;
+    let mut dbs: Vec<String> = Vec::new();
+
+    for line in out.stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let lower = trimmed.to_lowercase();
+        if lower.starts_with("error:")
+            || lower.starts_with("fatal:")
+            || lower.starts_with("warning:")
+            || lower.contains("permission denied")
+            || lower.contains("could not connect")
+            || lower.contains("command not found")
+            || lower.contains("password authentication failed")
+        {
+            continue;
+        }
+        if !dbs.contains(&trimmed.to_string()) {
+            dbs.push(trimmed.to_string());
+        }
+    }
+
+    if target_type == "redis" {
+        if !dbs.contains(&"dump.rdb".to_string()) {
+            dbs.insert(0, "dump.rdb".to_string());
+        }
+    }
+
+    Ok(dbs)
+}

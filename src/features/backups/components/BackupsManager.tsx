@@ -22,6 +22,7 @@ import {
   deleteCloudConfig,
   testCloudStorageConnection,
   uploadBackupToCloud,
+  listServerDatabases,
   type BackupRecord, 
   type CreateBackupOptions,
   type BackupSchedule,
@@ -84,6 +85,11 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const [customCommand, setCustomCommand] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
 
+  // Database Discovery State (Ad-hoc Dump)
+  const [discoveredDbs, setDiscoveredDbs] = useState<string[]>([]);
+  const [loadingDbs, setLoadingDbs] = useState(false);
+  const [isCustomTargetName, setIsCustomTargetName] = useState(false);
+
   // --- Schedules State ---
   const [schedules, setSchedules] = useState<BackupSchedule[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState(false);
@@ -107,6 +113,11 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   const [schedDbPort, setSchedDbPort] = useState('');
   const [schedShowAdvancedDb, setSchedShowAdvancedDb] = useState(false);
   const [schedCustomCommand, setSchedCustomCommand] = useState('');
+
+  // Database Discovery State (Schedule)
+  const [schedDiscoveredDbs, setSchedDiscoveredDbs] = useState<string[]>([]);
+  const [schedLoadingDbs, setSchedLoadingDbs] = useState(false);
+  const [schedIsCustomTargetName, setSchedIsCustomTargetName] = useState(false);
 
   // --- Cloud Storage State ---
   const [cloudConfigs, setCloudConfigs] = useState<CloudStorageConfig[]>([]);
@@ -183,6 +194,63 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
     loadSchedules();
     loadCloudConfigs();
   }, [serverId]);
+
+  const fetchLiveDatabases = async (type: string, isSchedule = false) => {
+    if (type !== 'postgres' && type !== 'mysql' && type !== 'redis') return;
+    if (isSchedule) {
+      setSchedLoadingDbs(true);
+    } else {
+      setLoadingDbs(true);
+    }
+    try {
+      const dbs = await listServerDatabases(serverId, {
+        target_type: type,
+        db_user: (isSchedule ? schedDbUser : dbUser).trim() || undefined,
+        db_password: (isSchedule ? schedDbPassword : dbPassword).trim() || undefined,
+        db_host: (isSchedule ? schedDbHost : dbHost).trim() || undefined,
+        db_port: isSchedule ? (schedDbPort ? Number(schedDbPort) : undefined) : (dbPort ? Number(dbPort) : undefined),
+      });
+      if (isSchedule) {
+        setSchedDiscoveredDbs(dbs);
+        if (dbs.length > 0) {
+          if (!schedTargetName || !dbs.includes(schedTargetName)) {
+            const best = type === 'postgres' ? (dbs.find(d => d !== 'postgres') || dbs[0]) : dbs[0];
+            setSchedTargetName(best);
+          }
+          setSchedIsCustomTargetName(false);
+        }
+      } else {
+        setDiscoveredDbs(dbs);
+        if (dbs.length > 0) {
+          if (!targetName || !dbs.includes(targetName)) {
+            const best = type === 'postgres' ? (dbs.find(d => d !== 'postgres') || dbs[0]) : dbs[0];
+            setTargetName(best);
+          }
+          setIsCustomTargetName(false);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Could not auto-discover server databases:', err);
+    } finally {
+      if (isSchedule) {
+        setSchedLoadingDbs(false);
+      } else {
+        setLoadingDbs(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (createModalOpen && (targetType === 'postgres' || targetType === 'mysql' || targetType === 'redis')) {
+      fetchLiveDatabases(targetType, false);
+    }
+  }, [createModalOpen, targetType, serverId]);
+
+  useEffect(() => {
+    if (scheduleModalOpen && (schedTargetType === 'postgres' || schedTargetType === 'mysql' || schedTargetType === 'redis')) {
+      fetchLiveDatabases(schedTargetType, true);
+    }
+  }, [scheduleModalOpen, schedTargetType, serverId]);
 
   // --- Handlers: Snapshots ---
   const handleCreate = async (e?: React.FormEvent) => {
@@ -1292,24 +1360,139 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
             </div>
 
             <div>
-              <label className="text-xs font-medium text-foreground">
-                {targetType === 'directory' ? 'Absolute Directory Path' : 'Database / Service Name'}
-              </label>
-              <Input
-                placeholder={
-                  targetType === 'directory' 
-                    ? '/var/www/my-app' 
-                    : targetType === 'postgres' 
-                      ? 'e.g. tenant_speed_main_mox1gfsi' 
-                      : targetType === 'mysql' 
-                        ? 'e.g. my_database' 
-                        : 'dump.rdb'
-                }
-                value={targetName}
-                onChange={e => setTargetName(e.target.value)}
-                required
-                className="mt-1 bg-background border-input text-foreground text-xs font-mono"
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground">
+                  {targetType === 'directory' ? 'Absolute Directory Path' : 'Database / Service Name'}
+                </label>
+                {(targetType === 'postgres' || targetType === 'mysql' || targetType === 'redis') && (
+                  <div className="flex items-center gap-2">
+                    {loadingDbs ? (
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                        <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                        <span>Scanning...</span>
+                      </span>
+                    ) : discoveredDbs.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextState = !isCustomTargetName;
+                          setIsCustomTargetName(nextState);
+                          if (!nextState && discoveredDbs.length > 0) {
+                            setTargetName(discoveredDbs[0]);
+                          }
+                        }}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-mono"
+                      >
+                        {isCustomTargetName ? '← Detected list' : '✏️ Custom name'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fetchLiveDatabases(targetType, false)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-mono"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        <span>Scan</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {targetType === 'directory' || targetType === 'custom' || isCustomTargetName || discoveredDbs.length === 0 ? (
+                <div className="mt-1 space-y-1">
+                  <Input
+                    placeholder={
+                      targetType === 'directory' 
+                        ? '/var/www/my-app' 
+                        : targetType === 'postgres' 
+                          ? 'e.g. tenant_speed_main_mox1gfsi' 
+                          : targetType === 'mysql' 
+                            ? 'e.g. my_database' 
+                            : 'dump.rdb'
+                    }
+                    value={targetName}
+                    onChange={e => setTargetName(e.target.value)}
+                    required
+                    className="bg-background border-input text-foreground text-xs font-mono"
+                  />
+                  {discoveredDbs.length > 0 && isCustomTargetName && (
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                      <span>Custom manual entry</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomTargetName(false);
+                          if (discoveredDbs.length > 0) {
+                            setTargetName(discoveredDbs[0]);
+                          }
+                        }}
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        ← Select from {discoveredDbs.length} detected database{discoveredDbs.length > 1 ? 's' : ''}
+                      </button>
+                    </div>
+                  )}
+                  {discoveredDbs.length === 0 && !loadingDbs && (targetType === 'postgres' || targetType === 'mysql' || targetType === 'redis') && (
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                      <span>No databases detected automatically</span>
+                      <button
+                        type="button"
+                        onClick={() => fetchLiveDatabases(targetType, false)}
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        <span>Retry scan</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-1 space-y-1">
+                  <div className="relative">
+                    <select
+                      value={targetName}
+                      onChange={e => {
+                        if (e.target.value === '__custom__') {
+                          setIsCustomTargetName(true);
+                          setTargetName('');
+                        } else {
+                          setTargetName(e.target.value);
+                        }
+                      }}
+                      className="w-full h-9 px-3 py-1.5 rounded-md border border-input bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none cursor-pointer"
+                    >
+                      <option value="" disabled>-- Select a database --</option>
+                      {discoveredDbs.map(db => (
+                        <option key={db} value={db}>
+                          {targetType === 'postgres' ? '🐘 ' : targetType === 'mysql' ? '🐬 ' : '⚡ '}
+                          {db}
+                        </option>
+                      ))}
+                      <option value="__custom__">✏️ Enter custom database name...</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground text-xs">
+                      ▼
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>{discoveredDbs.length} database{discoveredDbs.length > 1 ? 's' : ''} detected on server</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => fetchLiveDatabases(targetType, false)}
+                      disabled={loadingDbs}
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className={`h-2.5 w-2.5 ${loadingDbs ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {targetType === 'postgres' && (
                 <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed">
                   💡 <span className="text-foreground">Auto-connection:</span> Defaults to <code className="text-indigo-600 dark:text-indigo-300 bg-muted px-1 py-0.5 rounded font-mono border border-border">postgres</code> superuser via peer socket auth or auto-detects running PostgreSQL Docker containers.
@@ -1466,24 +1649,138 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
             </div>
 
             <div>
-              <label className="text-xs font-medium text-foreground">
-                {schedTargetType === 'directory' ? 'Absolute Directory Path' : 'Database / Service Name'}
-              </label>
-              <Input
-                placeholder={
-                  schedTargetType === 'directory' 
-                    ? '/var/www/my-app' 
-                    : schedTargetType === 'postgres' 
-                      ? 'e.g. tenant_speed_main_mox1gfsi' 
-                      : schedTargetType === 'mysql' 
-                        ? 'e.g. my_database' 
-                        : 'dump.rdb'
-                }
-                value={schedTargetName}
-                onChange={e => setSchedTargetName(e.target.value)}
-                required
-                className="mt-1 bg-background border-input text-foreground text-xs font-mono"
-              />
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-foreground">
+                  {schedTargetType === 'directory' ? 'Absolute Directory Path' : 'Database / Service Name'}
+                </label>
+                {(schedTargetType === 'postgres' || schedTargetType === 'mysql' || schedTargetType === 'redis') && (
+                  <div className="flex items-center gap-2">
+                    {schedLoadingDbs ? (
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-mono">
+                        <Loader2 className="h-3 w-3 animate-spin text-indigo-500" />
+                        <span>Scanning...</span>
+                      </span>
+                    ) : schedDiscoveredDbs.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextState = !schedIsCustomTargetName;
+                          setSchedIsCustomTargetName(nextState);
+                          if (!nextState && schedDiscoveredDbs.length > 0) {
+                            setSchedTargetName(schedDiscoveredDbs[0]);
+                          }
+                        }}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-mono"
+                      >
+                        {schedIsCustomTargetName ? '← Detected list' : '✏️ Custom name'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => fetchLiveDatabases(schedTargetType, true)}
+                        className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-mono"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        <span>Scan</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {schedTargetType === 'directory' || schedTargetType === 'custom' || schedIsCustomTargetName || schedDiscoveredDbs.length === 0 ? (
+                <div className="mt-1 space-y-1">
+                  <Input
+                    placeholder={
+                      schedTargetType === 'directory' 
+                        ? '/var/www/my-app' 
+                        : schedTargetType === 'postgres' 
+                          ? 'e.g. tenant_speed_main_mox1gfsi' 
+                          : schedTargetType === 'mysql' 
+                            ? 'e.g. my_database' 
+                            : 'dump.rdb'
+                    }
+                    value={schedTargetName}
+                    onChange={e => setSchedTargetName(e.target.value)}
+                    required
+                    className="bg-background border-input text-foreground text-xs font-mono"
+                  />
+                  {schedDiscoveredDbs.length > 0 && schedIsCustomTargetName && (
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                      <span>Custom manual entry</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSchedIsCustomTargetName(false);
+                          if (schedDiscoveredDbs.length > 0) {
+                            setSchedTargetName(schedDiscoveredDbs[0]);
+                          }
+                        }}
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                      >
+                        ← Select from {schedDiscoveredDbs.length} detected database{schedDiscoveredDbs.length > 1 ? 's' : ''}
+                      </button>
+                    </div>
+                  )}
+                  {schedDiscoveredDbs.length === 0 && !schedLoadingDbs && (schedTargetType === 'postgres' || schedTargetType === 'mysql' || schedTargetType === 'redis') && (
+                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                      <span>No databases detected automatically</span>
+                      <button
+                        type="button"
+                        onClick={() => fetchLiveDatabases(schedTargetType, true)}
+                        className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                      >
+                        <RefreshCw className="h-2.5 w-2.5" />
+                        <span>Retry scan</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-1 space-y-1">
+                  <div className="relative">
+                    <select
+                      value={schedTargetName}
+                      onChange={e => {
+                        if (e.target.value === '__custom__') {
+                          setSchedIsCustomTargetName(true);
+                          setSchedTargetName('');
+                        } else {
+                          setSchedTargetName(e.target.value);
+                        }
+                      }}
+                      className="w-full h-9 px-3 py-1.5 rounded-md border border-input bg-background text-foreground text-xs font-mono focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 appearance-none cursor-pointer"
+                    >
+                      <option value="" disabled>-- Select a database --</option>
+                      {schedDiscoveredDbs.map(db => (
+                        <option key={db} value={db}>
+                          {schedTargetType === 'postgres' ? '🐘 ' : schedTargetType === 'mysql' ? '🐬 ' : '⚡ '}
+                          {db}
+                        </option>
+                      ))}
+                      <option value="__custom__">✏️ Enter custom database name...</option>
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-muted-foreground text-xs">
+                      ▼
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>{schedDiscoveredDbs.length} database{schedDiscoveredDbs.length > 1 ? 's' : ''} detected on server</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => fetchLiveDatabases(schedTargetType, true)}
+                      disabled={schedLoadingDbs}
+                      className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className={`h-2.5 w-2.5 ${schedLoadingDbs ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {(schedTargetType === 'postgres' || schedTargetType === 'mysql') && (
