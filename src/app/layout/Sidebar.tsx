@@ -9,6 +9,7 @@ import {
   PanelLeftClose, 
   PanelLeftOpen, 
   FolderTree, 
+  Radio,
   X 
 } from 'lucide-react';
 import { GroupTree } from '@/features/groups/components/GroupTree';
@@ -111,6 +112,24 @@ export const Sidebar = () => {
             >
               <History className="h-4 w-4 shrink-0" />
               {!isCollapsed && <span className="text-sm font-medium">Activity</span>}
+            </NavLink>
+
+            <NavLink
+              to="/fleet"
+              onClick={handleNavClick}
+              title="Fleet Commander (Multi-Server)"
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-200 ${
+                  isCollapsed ? 'justify-center px-2' : ''
+                } ${
+                  isActive
+                    ? 'bg-primary/15 text-primary font-semibold shadow-xs'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`
+              }
+            >
+              <Radio className="h-4 w-4 shrink-0 text-cyan-400" />
+              {!isCollapsed && <span className="text-sm font-medium">Fleet Commander</span>}
             </NavLink>
           </nav>
 

@@ -4215,7 +4215,7 @@ dependencies = [
 
 [[package]]
 name = "server-command-center"
-version = "1.2.4"
+version = "1.2.6"
 dependencies = [
  "aes-gcm",
  "argon2",

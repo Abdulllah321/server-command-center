@@ -57,6 +57,13 @@ export const AppShell = () => {
         type: 'activity',
         path: '/activity',
       });
+    } else if (pathname === '/fleet') {
+      openTab({
+        id: 'tab-fleet',
+        title: 'Fleet Commander',
+        type: 'fleet',
+        path: '/fleet',
+      });
     } else if (pathname === '/settings') {
       openTab({
         id: 'tab-settings',

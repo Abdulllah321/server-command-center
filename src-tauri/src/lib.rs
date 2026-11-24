@@ -209,6 +209,7 @@ pub fn run() {
         commands::env_vars::save_env_file,
         commands::env_vars::list_env_backups,
         commands::env_vars::restore_env_backup,
+        commands::fleet::execute_fleet_command,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])

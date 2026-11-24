@@ -4,6 +4,7 @@ import { Dashboard } from '@/app/routes/Dashboard';
 import { ServerDetail } from '@/app/routes/ServerDetail';
 import { GroupDetail } from '@/features/groups/components/GroupDetail';
 import { ActivityScreen } from '@/features/activity/components/ActivityScreen';
+import { FleetCommander } from '@/features/fleet/components/FleetCommander';
 import { Settings } from '@/app/routes/Settings';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 
@@ -57,6 +58,15 @@ export const WorkspaceTabViewport: React.FC = () => {
                 fallbackDescription="Failed to load and render the activity log history."
               >
                 <ActivityScreen />
+              </ErrorBoundary>
+            )}
+
+            {tab.type === 'fleet' && (
+              <ErrorBoundary
+                fallbackTitle="Fleet Commander Error"
+                fallbackDescription="Failed to render Fleet Commander cockpit."
+              >
+                <FleetCommander />
               </ErrorBoundary>
             )}
 

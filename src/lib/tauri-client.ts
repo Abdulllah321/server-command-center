@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -974,6 +974,21 @@ export const listEnvBackups = async (serverId: string, filePath: string): Promis
 
 export const restoreEnvBackup = async (serverId: string, filePath: string, backupPath: string): Promise<void> => {
   return await invoke('restore_env_backup', { serverId, filePath, backupPath });
+};
+
+// Fleet Commander (Multi-Server Bulk Execution)
+export const executeFleetCommand = async (
+  serverIds: string[], 
+  command: string, 
+  timeoutSeconds?: number, 
+  confirmationToken?: string
+): Promise<FleetExecutionSummary> => {
+  return await invoke('execute_fleet_command', {
+    serverIds,
+    command,
+    timeoutSeconds: timeoutSeconds || null,
+    confirmationToken: confirmationToken || null,
+  });
 };
 
 export interface InstallUpdatePayload {

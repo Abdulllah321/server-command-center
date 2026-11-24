@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type WorkspaceTabType = 'dashboard' | 'server' | 'group' | 'activity' | 'settings';
+export type WorkspaceTabType = 'dashboard' | 'server' | 'group' | 'activity' | 'settings' | 'fleet';
 
 export interface WorkspaceTab {
   id: string;

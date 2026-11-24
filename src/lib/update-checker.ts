@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.5';
+export const APP_VERSION = '1.2.6';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,21 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.6': {
+    summary: 'Fleet Commander (Multi-Server Bulk Execution): Concurrently run commands across all or filtered server clusters via pooled SSH sessions, curated Runbooks palette, real-time node matrix, and Markdown audit export.',
+    highlights: [
+      'Concurrent Fleet Execution: Execute commands simultaneously across dozens of remote servers in parallel using Rust tokio::task::JoinSet with pooled SSH connections and configurable per-node timeouts.',
+      'Target Fleet Selector: Filter nodes by environment group (Production, Staging, Dev, Clients, All) or granular individual server checkboxes with real-time target counters.',
+      'Curated Fleet Runbooks: 1-click execution palette for infrastructure health audits (Uptime & Kernel, Root Disk Usage, RAM & Swap, Pending Security Upgrades, Listening Ports, PM2 Cluster Status & Zero-Downtime Reload, PageCache Memory Freeing).',
+      'Live Execution Matrix: Visual node-by-node response deck displaying real-time status badges (Running, Success, Failed, Timeout, Offline), execution latency, process exit codes, and individual stdout/stderr logs.',
+      'Integrated Safety & Destructive Guards: Dangerous system operations require explicit confirmation tokens and double-confirmation modals before execution to prevent accidental cluster-wide outages.',
+      'Audit Export & Search: Filter cluster results by server name, status, or search query; copy command outputs to clipboard or export a full Markdown fleet audit report.'
+    ],
+    features: [
+      'Native Rust Command: `execute_fleet_command` registered in Tauri with pooled SSH async execution and comprehensive audit logging.',
+      'Workspace Tab Integration: Dedicated Fleet tab (/fleet) with full navigation, workspace tab preservation, and responsive layout.'
+    ]
+  },
   'v1.2.5': {
     summary: 'Environment Variables & Secrets Deck: Zero-daemon remote .env discovery, sensitive credential masking, versioned auto-backups, instant rollback, and cross-environment diffing.',
     highlights: [

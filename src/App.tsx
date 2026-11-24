@@ -5,6 +5,7 @@ import { ServerDetail } from './app/routes/ServerDetail';
 import { Settings } from './app/routes/Settings';
 import { ConfirmationProvider } from '@/components/shared/ConfirmationModal';
 import { ActivityScreen } from '@/features/activity/components/ActivityScreen';
+import { FleetCommander } from '@/features/fleet/components/FleetCommander';
 import { GroupDetail } from '@/features/groups/components/GroupDetail';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 import { Toaster } from '@/components/ui/sonner';
@@ -45,6 +46,14 @@ function App() {
                 element={
                   <ErrorBoundary fallbackTitle="Activity Log Error" fallbackDescription="Failed to load and render the activity log history.">
                     <ActivityScreen />
+                  </ErrorBoundary>
+                } 
+              />
+              <Route 
+                path="fleet" 
+                element={
+                  <ErrorBoundary fallbackTitle="Fleet Commander Error" fallbackDescription="Failed to render Fleet Commander cockpit.">
+                    <FleetCommander />
                   </ErrorBoundary>
                 } 
               />

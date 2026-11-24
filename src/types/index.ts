@@ -434,5 +434,26 @@ export interface EnvFileDetails {
   backups: EnvBackupEntry[];
 }
 
+export interface FleetServerResult {
+  server_id: string;
+  server_name: string;
+  hostname: string;
+  environment: string;
+  status: 'success' | 'failed' | 'timeout' | 'offline' | string;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  duration_ms: number;
+}
+
+export interface FleetExecutionSummary {
+  total_servers: number;
+  successful: number;
+  failed: number;
+  total_duration_ms: number;
+  command: string;
+  results: FleetServerResult[];
+}
+
 
 
