@@ -27,7 +27,8 @@ import {
   Network,
   FolderTree,
   ShieldCheck,
-  FileKey
+  FileKey,
+  Database
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
@@ -44,6 +45,7 @@ import { QuickConnectModal } from '@/features/servers/components/QuickConnectMod
 import { LogViewer } from '@/features/logs/components/LogViewer';
 import { ServerRebuildDeck } from '@/features/rebuild/components/ServerRebuildDeck';
 import { EnvManager } from '@/features/env/components/EnvManager';
+import { DatabaseManager } from '@/features/databases/components/DatabaseManager';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -224,6 +226,13 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
       icon: HardDrive, 
       accentColor: 'text-indigo-400', 
       accentBg: 'bg-indigo-400' 
+    },
+    { 
+      id: 'databases', 
+      label: 'Databases', 
+      icon: Database, 
+      accentColor: 'text-violet-400', 
+      accentBg: 'bg-violet-400' 
     },
     { 
       id: 'security', 
@@ -540,6 +549,11 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
         {/* Tab 8: Backups */}
         <TabsContent value="backups" className="flex-1 mt-6 overflow-y-auto pr-2">
           <BackupsManager serverId={id} />
+        </TabsContent>
+
+        {/* Tab: Databases */}
+        <TabsContent value="databases" className="flex-1 mt-6 overflow-hidden">
+          <DatabaseManager serverId={id!} isOnline={isOnline} />
         </TabsContent>
 
         {/* Tab 9: Security & Ports */}

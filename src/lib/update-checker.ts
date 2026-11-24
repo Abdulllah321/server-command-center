@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.2.6';
+export const APP_VERSION = '1.2.7';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,21 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.2.7': {
+    summary: 'Database Query Runner & Connection Monitor: Multi-engine support for PostgreSQL, MySQL, and Redis, with real-time query execution, live client connection monitoring, table disk size analysis, and read-only Safe Mode.',
+    highlights: [
+      'Multi-Engine Database Deck: Native support for PostgreSQL (psql), MySQL / MariaDB (mysql), and Redis (redis-cli) with automatic database and keyspace discovery via peer socket auth, docker containers, and custom credentials.',
+      'Interactive SQL & Command Editor: High-speed query execution with engine-specific quick snippet templates (active locks, top 10 table disk sizes, index cache hit ratio, dead tuples & vacuum status, buffer pool hit rate, slow queries).',
+      'Read-Only Safe Mode & Confirmation Gate: Active-by-default safe mode blocks mutation and destructive queries (DROP, DELETE, UPDATE, ALTER, TRUNCATE, FLUSHDB) unless explicitly disabled and confirmed with single-use tokens.',
+      'Tabular Results Grid with Search & Export: Sort, search, and paginate through thousands of rows with null-value indicators, duration timings, and 1-click export to CSV, JSON, or clipboard.',
+      'Live Active Connection Monitor: Real-time inspection of client connections (pg_stat_activity, SHOW FULL PROCESSLIST, CLIENT LIST), connection duration, current query snippets, and 1-click connection termination / kill.',
+      'Database & Schema Explorer: Instant visibility into all tables, estimated row counts, human-readable disk sizes, and 1-click quick SELECT queries.'
+    ],
+    features: [
+      'Native Backend Commands: `execute_database_query`, `get_database_connections`, `terminate_database_connection`, `get_database_schema_tables` running securely over pooled SSH sessions.',
+      'Activity Log Discipline: Query mutations and terminated connections are securely logged in SQLite with credentials strictly masked.'
+    ]
+  },
   'v1.2.6': {
     summary: 'Fleet Commander (Multi-Server Bulk Execution): Concurrently run commands across all or filtered server clusters via pooled SSH sessions, curated Runbooks palette, real-time node matrix, and Markdown audit export.',
     highlights: [

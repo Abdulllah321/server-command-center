@@ -455,5 +455,59 @@ export interface FleetExecutionSummary {
   results: FleetServerResult[];
 }
 
+export type DatabaseEngine = 'postgres' | 'mysql' | 'redis';
+
+export interface DatabaseCredentials {
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+}
+
+export interface DatabaseQueryResult {
+  columns: string[];
+  rows: Record<string, any>[];
+  row_count: number;
+  execution_time_ms: number;
+  affected_rows: number | null;
+  raw_output: string;
+  is_truncated: boolean;
+}
+
+export interface DatabaseConnectionItem {
+  id: string;
+  database: string;
+  user: string;
+  client_addr: string;
+  state: string;
+  query: string;
+  duration_seconds: number;
+  wait_event: string | null;
+}
+
+export interface DatabaseConnectionStats {
+  total_connections: number;
+  active_connections: number;
+  idle_connections: number;
+  max_connections_limit: number | null;
+  connections: DatabaseConnectionItem[];
+}
+
+export interface DatabaseTableInfo {
+  name: string;
+  schema: string;
+  row_estimate: number;
+  total_size_pretty: string;
+  table_type: string;
+}
+
+export interface DatabaseSchemaSummary {
+  database: string;
+  engine: string;
+  tables: DatabaseTableInfo[];
+  total_tables: number;
+  keyspaces: string[] | null;
+}
+
 
 

@@ -24,5 +24,6 @@ pub mod security_audit;
 pub mod updater;
 pub mod env_vars;
 pub mod fleet;
+pub mod database;
 
 

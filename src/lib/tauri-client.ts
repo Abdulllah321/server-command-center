@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary } from '../types';
-export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary };
+import type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo } from '../types';
+export type { Server, AuthMethod, RebuildProfile, RebuildStep, CreateCredentialPayload, CredentialMetadataExtended, Application, CreateApplicationOptions, Command, ServerGroupTree, ServerGroup, UpdateGroupPayload, WindowsHelloStatus, RemoteFileEntry, RemoteDirectoryListing, RemoteFileContent, DownloadedFilePayload, UploadFileChunkPayload, EnvFileEntry, EnvVariableItem, EnvBackupEntry, EnvFileDetails, FleetServerResult, FleetExecutionSummary, DatabaseQueryResult, DatabaseConnectionStats, DatabaseSchemaSummary, DatabaseEngine, DatabaseCredentials, DatabaseConnectionItem, DatabaseTableInfo };
 
 // Servers
 export const listServers = async (): Promise<Server[]> => {
@@ -1020,6 +1020,96 @@ export const openExternalUrl = async (url: string): Promise<void> => {
   } catch {
     window.open(url, '_blank', 'noopener,noreferrer');
   }
+};
+
+// ==========================================
+// Database Query Runner & Connection Monitor
+// ==========================================
+
+export interface ExecuteDatabaseQueryOptions {
+  serverId: string;
+  engine: 'postgres' | 'mysql' | 'redis';
+  database: string;
+  query: string;
+  credentials?: {
+    host?: string;
+    port?: number;
+    user?: string;
+    password?: string;
+  };
+  safeMode?: boolean;
+  confirmationToken?: string;
+}
+
+export const executeDatabaseQuery = async (opts: ExecuteDatabaseQueryOptions): Promise<DatabaseQueryResult> => {
+  return await invoke('execute_database_query', {
+    serverId: opts.serverId,
+    engine: opts.engine,
+    database: opts.database,
+    query: opts.query,
+    credentials: opts.credentials || null,
+    safeMode: opts.safeMode ?? true,
+    confirmationToken: opts.confirmationToken || null,
+  });
+};
+
+export const getDatabaseConnections = async (
+  serverId: string,
+  engine: 'postgres' | 'mysql' | 'redis',
+  database?: string,
+  credentials?: {
+    host?: string;
+    port?: number;
+    user?: string;
+    password?: string;
+  }
+): Promise<DatabaseConnectionStats> => {
+  return await invoke('get_database_connections', {
+    serverId,
+    engine,
+    database: database || null,
+    credentials: credentials || null,
+  });
+};
+
+export const terminateDatabaseConnection = async (
+  serverId: string,
+  engine: 'postgres' | 'mysql' | 'redis',
+  connectionId: string,
+  credentials?: {
+    host?: string;
+    port?: number;
+    user?: string;
+    password?: string;
+  },
+  confirmationToken?: string
+): Promise<string> => {
+  return await invoke('terminate_database_connection', {
+    serverId,
+    engine,
+    connectionId,
+    credentials: credentials || null,
+    confirmationToken: confirmationToken || null,
+  });
+};
+
+export const getDatabaseSchemaTables = async (
+  serverId: string,
+  engine: 'postgres' | 'mysql' | 'redis',
+  database: string,
+  credentials?: {
+    host?: string;
+    port?: number;
+    user?: string;
+    password?: string;
+  }
+): Promise<DatabaseSchemaSummary> => {
+  return await invoke('get_database_schema_tables', {
+    serverId,
+    engine,
+    database,
+    credentials: credentials || null,
+  });
 };
 
 

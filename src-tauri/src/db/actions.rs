@@ -68,4 +68,6 @@ pub const EXTRACT_REMOTE_PATH: &str = "extract_remote_path";
 pub const SAVE_ENV_FILE: &str = "save_env_file";
 pub const RESTORE_ENV_FILE: &str = "restore_env_file";
 pub const FLEET_COMMAND: &str = "fleet_command";
+pub const DATABASE_QUERY: &str = "database_query";
+pub const TERMINATE_DATABASE_CONNECTION: &str = "terminate_database_connection";
 

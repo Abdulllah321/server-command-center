@@ -210,6 +210,10 @@ pub fn run() {
         commands::env_vars::list_env_backups,
         commands::env_vars::restore_env_backup,
         commands::fleet::execute_fleet_command,
+        commands::database::execute_database_query,
+        commands::database::get_database_connections,
+        commands::database::terminate_database_connection,
+        commands::database::get_database_schema_tables,
         commands::updater::download_and_install_update,
         commands::updater::open_external_url,
     ])
