@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.3.2';
+export const APP_VERSION = '1.3.3';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,23 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.3': {
+    summary: 'Native OS Desktop Notifications & UI Stacking Context Fixes: Integrated official Tauri Notification Plugin for native Windows Action Center, macOS, and Linux desktop toast alerts even when the app is minimized, fixed TopBar dropdown clipping over cockpit controls, and added active auto-centering with dynamic scroll masks for sub-navigation tabs.',
+    highlights: [
+      'Native OS Desktop Notifications: Emits real operating system notifications directly to the OS Action Center/Notification Center when alert thresholds are breached, ensuring system administrators never miss a critical server event while working in other apps.',
+      'Desktop Notification Controls: Added toggle and instant "Send Test OS Notification" button directly inside the TopBar notification dropdown for fast verification.',
+      'TopBar Dropdown Stacking Context Fix: Elevated TopBar header to `relative z-40` and dropdown card to `z-[100]`, completely eliminating the clipping bug where alerts rendered underneath the Quick Connect / Provision buttons.',
+      'Sub-Navigation Tab Scroll Edge Protection: Dynamic scroll gradient fade masks with auto-centering on tab activation, preventing the leftmost tab ("Overview") from ever being partially cut off.'
+    ],
+    features: [
+      'OS Desktop Integration: `@tauri-apps/plugin-notification` with `tauri-plugin-notification = "2"` and Web Notification fallback.',
+      'Test Alert Dispatch: 1-click test button to immediately test and verify OS desktop notifications without waiting for a server threshold breach.'
+    ],
+    fixes: [
+      'Resolved notification dropdown clipping underneath ServerDetail action buttons.',
+      'Resolved subnav leftmost tab text truncation ("...view") when scrolled horizontally.'
+    ]
+  },
   'v1.3.2': {
     summary: 'Global Alert Notification Center & Sub-Navigation Peeling Fix: Automated background telemetry evaluation on every health poll with 5-minute intelligent debouncing, default rule auto-seeding, top-bar Notification Center bell with unread counter, native Web Audio synthesizer chimes, proactive Server Overview alert banners, and fixed sub-navigation tab left clipping.',
     highlights: [

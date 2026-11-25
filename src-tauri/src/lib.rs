@@ -38,6 +38,7 @@ pub fn run() {
     }));
 
   tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Run database migrations
             let app_dir = app.path().app_data_dir().expect("failed to get app data dir");

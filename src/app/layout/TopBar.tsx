@@ -75,7 +75,7 @@ export const TopBar = ({ onSearchClick }: TopBarProps) => {
   const remaining = calculateRemaining();
 
   return (
-    <header className="border-b border-border bg-card/75 backdrop-blur-md shrink-0 transition-all select-none pt-[max(env(safe-area-inset-top,0px),0.625rem)] md:pt-0">
+    <header className="relative z-40 border-b border-border bg-card/75 backdrop-blur-md shrink-0 transition-all select-none pt-[max(env(safe-area-inset-top,0px),0.625rem)] md:pt-0">
       <div className="h-13 md:h-14 px-3 sm:px-6 flex items-center justify-between gap-2">
         {/* Mobile View: Brand + Menu */}
         <div className="flex md:hidden items-center gap-2 min-w-0">

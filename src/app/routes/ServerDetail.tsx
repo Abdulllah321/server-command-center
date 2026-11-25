@@ -86,11 +86,46 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [copiedHost, setCopiedHost] = useState(false);
   const tabsListRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = () => {
+    if (tabsListRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsListRef.current;
+      setCanScrollLeft(scrollLeft > 6);
+      setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
+    }
+  };
+
+  useEffect(() => {
+    checkScroll();
+    const el = tabsListRef.current;
+    if (el) {
+      el.addEventListener('scroll', checkScroll, { passive: true });
+      window.addEventListener('resize', checkScroll);
+      return () => {
+        el.removeEventListener('scroll', checkScroll);
+        window.removeEventListener('resize', checkScroll);
+      };
+    }
+  }, []);
+
+  // When activeTab changes, auto scroll it into view cleanly without edge clipping
+  useEffect(() => {
+    if (tabsListRef.current) {
+      const activeEl = tabsListRef.current.querySelector(`[data-state="active"]`) as HTMLElement;
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      setTimeout(checkScroll, 300);
+    }
+  }, [activeTab]);
 
   const scrollTabs = (direction: 'left' | 'right') => {
     if (tabsListRef.current) {
-      const scrollAmount = direction === 'left' ? -260 : 260;
+      const scrollAmount = direction === 'left' ? -280 : 280;
       tabsListRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(checkScroll, 320);
     }
   };
 
@@ -375,20 +410,24 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
 
       {/* Main Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col flex-1 min-h-0">
-        <div className="relative w-full flex items-center shrink-0 group/tabnav">
-          {/* Scroll Left Button */}
-          <button
-            type="button"
-            onClick={() => scrollTabs('left')}
-            className="absolute left-1 z-10 p-1 rounded-xl bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-md backdrop-blur-md opacity-0 group-hover/tabnav:opacity-100 transition-opacity hover:scale-105 active:scale-95"
-            title="Scroll tabs left"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
+        <div className="relative w-full flex items-center shrink-0">
+          {/* Scroll Left Button & Gradient Fade Mask */}
+          {canScrollLeft && (
+            <div className="absolute left-0 inset-y-0 flex items-center z-20 pl-1 pr-4 bg-gradient-to-r from-background via-background/95 to-transparent rounded-l-2xl">
+              <button
+                type="button"
+                onClick={() => scrollTabs('left')}
+                className="p-1 rounded-xl bg-card border border-border text-foreground hover:bg-muted shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                title="Scroll tabs left towards Overview"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           <TabsList 
             ref={tabsListRef} 
-            className="w-full flex items-center justify-start overflow-x-auto scroll-smooth no-scrollbar bg-card/80 border border-border p-1.5 rounded-2xl gap-1.5 shadow-lg backdrop-blur-md shrink-0 px-2.5"
+            className="w-full flex items-center justify-start overflow-x-auto scroll-smooth no-scrollbar bg-card/80 border border-border p-1.5 rounded-2xl gap-1.5 shadow-lg backdrop-blur-md shrink-0 px-3 scroll-px-4"
           >
             {NAV_TABS.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -432,15 +471,19 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
             })}
           </TabsList>
 
-          {/* Scroll Right Button */}
-          <button
-            type="button"
-            onClick={() => scrollTabs('right')}
-            className="absolute right-1 z-10 p-1 rounded-xl bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-md backdrop-blur-md opacity-0 group-hover/tabnav:opacity-100 transition-opacity hover:scale-105 active:scale-95"
-            title="Scroll tabs right"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </button>
+          {/* Scroll Right Button & Gradient Fade Mask */}
+          {canScrollRight && (
+            <div className="absolute right-0 inset-y-0 flex items-center z-20 pr-1 pl-4 bg-gradient-to-l from-background via-background/95 to-transparent rounded-r-2xl">
+              <button
+                type="button"
+                onClick={() => scrollTabs('right')}
+                className="p-1 rounded-xl bg-card border border-border text-foreground hover:bg-muted shadow-lg backdrop-blur-md transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                title="Scroll tabs right"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
         </div>
         
         {/* Tab 1: Overview */}
