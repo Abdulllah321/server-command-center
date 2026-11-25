@@ -127,3 +127,4 @@ export async function sendTestDesktopNotification(): Promise<boolean> {
     body: 'OS Desktop Notification subsystem is active and operating normally across your workstation.',
   });
 }
+
