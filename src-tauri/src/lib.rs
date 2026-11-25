@@ -182,6 +182,8 @@ pub fn run() {
         commands::alerts::save_alert_rule,
         commands::alerts::delete_alert_rule,
         commands::alerts::get_alert_history,
+        commands::alerts::get_all_recent_alerts,
+        commands::alerts::clear_alert_history,
         commands::alerts::evaluate_health_alerts,
         pipelines::rebuild_engine::trigger_rebuild,
         pipelines::rebuild_engine::abort_pipeline,

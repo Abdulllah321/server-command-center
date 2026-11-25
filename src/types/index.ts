@@ -339,6 +339,7 @@ export interface AlertRule {
 export interface AlertHistoryEntry {
   id: string;
   server_id: string;
+  server_name?: string;
   metric: string;
   value: number;
   message: string;

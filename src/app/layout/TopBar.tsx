@@ -19,6 +19,7 @@ import { useUiStore } from '@/stores/ui-store';
 import { useTheme } from 'next-themes';
 import { checkWindowsHello, unlockVaultWithWindowsHello } from '@/lib/tauri-client';
 import { toast } from 'sonner';
+import { NotificationCenterDropdown } from '@/features/alerts/components/NotificationCenterDropdown';
 
 interface TopBarProps {
   onSearchClick?: () => void;
@@ -137,6 +138,9 @@ export const TopBar = ({ onSearchClick }: TopBarProps) => {
               )}
             </button>
           )}
+
+          {/* Global Alert Notification Center */}
+          <NotificationCenterDropdown />
 
           {/* Vault Status Indicator */}
           <div className="flex items-center shrink-0">

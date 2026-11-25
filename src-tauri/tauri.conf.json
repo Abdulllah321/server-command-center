@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Server Command Center",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "identifier": "com.falahtech.servercommandcenter",
   "build": {
     "frontendDist": "../dist",

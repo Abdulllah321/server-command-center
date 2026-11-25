@@ -779,6 +779,7 @@ export interface AlertRule {
 export interface AlertHistoryEntry {
   id: string;
   server_id: string;
+  server_name?: string;
   metric: string;
   value: number;
   message: string;
@@ -826,6 +827,14 @@ export const evaluateHealthAlerts = async (payload: {
       errored_pm2_count: payload.erroredPm2Count,
     },
   });
+};
+
+export const getAllRecentAlerts = async (limit?: number): Promise<AlertHistoryEntry[]> => {
+  return await invoke('get_all_recent_alerts', { limit: limit ?? null });
+};
+
+export const clearAlertHistory = async (serverId?: string): Promise<void> => {
+  return await invoke('clear_alert_history', { serverId: serverId ?? null });
 };
 
 // ── Scheduled Rebuilds & Deployments ─────────────────────────────

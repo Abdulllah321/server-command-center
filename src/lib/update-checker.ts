@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.3.2';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,22 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.2': {
+    summary: 'Global Alert Notification Center & Sub-Navigation Peeling Fix: Automated background telemetry evaluation on every health poll with 5-minute intelligent debouncing, default rule auto-seeding, top-bar Notification Center bell with unread counter, native Web Audio synthesizer chimes, proactive Server Overview alert banners, and fixed sub-navigation tab left clipping.',
+    highlights: [
+      'Fixed Sub-Navigation Tab Peeling: Completely resolved leftmost tab clipping ("Overview" cut off) by switching to `justify-start`, adding `shrink-0 whitespace-nowrap`, and implementing smooth left/right scroll arrows.',
+      'Automated Alert Evaluation: Telemetry health polls now automatically evaluate active alert rules for CPU %, Memory %, Disk %, Load average, and crashed PM2 processes on every snapshot.',
+      'Smart 5-Minute Debouncing: Deduplicates alerts per server/metric to eliminate notification spamming during sustained high resource utilization.',
+      'Auto-Seeded Default Rules: Automatically provisions sensible production watchdog rules (CPU >85%, RAM >90%, Disk >90%, PM2 crashes ≥1) if a server has no rules configured.',
+      'TopBar Notification Center Bell: Real-time fleet-wide alert feed dropdown with unread counter badges, severity indicators, and 1-click server navigation.',
+      'Native Audio Chime & Sonner Toasts: Cross-platform synthesized Web Audio ping and high-visibility alert toasts fired on threshold breach.',
+      'Server Overview Alert Banner: High-priority warning banner displayed right on the Server Overview when metrics breach thresholds.'
+    ],
+    features: [
+      'Backend Commands: `get_all_recent_alerts`, `clear_alert_history`, and automated `evaluate_snapshot_alerts`.',
+      'UI Components: `NotificationCenterDropdown`, `ServerAlertBanner`, and enhanced `ServerDetail` sub-navigation.'
+    ]
+  },
   'v1.3.1': {
     summary: 'Fresh Server Provisioning & Setup Wizard: Complete server bootstrap engine to transform bare-metal or cloud VPS instances into production-hardened hosts with zero Docker overhead. Features 1-click architecture presets, non-root deploy user creation, swap memory protection, UFW firewall, fail2ban defense, standalone Bash script export, and real-time streaming SSH terminal execution.',
     highlights: [

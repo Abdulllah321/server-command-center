@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { TerminalTabManager } from '@/features/terminal/components/TerminalTabManager';
 import { HealthWidget } from '@/features/health/components/HealthWidget';
@@ -30,7 +30,9 @@ import {
   FileKey,
   Database,
   CalendarClock,
-  Wrench
+  Wrench,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { cn } from 'cn';
 import { QuickActionsGrid } from '@/features/quick-actions/components/QuickActionsGrid';
@@ -53,6 +55,7 @@ import { CronManager } from '@/features/cron/components/CronManager';
 import { HistoricalMetricsCharts } from '@/features/health/components/HistoricalMetricsCharts';
 import { ProcessConsumersTable } from '@/features/health/components/ProcessConsumersTable';
 import { SslExpiryWatchdogAlert } from '@/features/nginx/components/SslExpiryWatchdogAlert';
+import { ServerAlertBanner } from '@/features/alerts/components/ServerAlertBanner';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getServer, deleteServer, requestConfirmation, restartPm2Process, reloadPm2Process } from '@/lib/tauri-client';
 import { usePm2Processes } from '@/features/pm2/api';
@@ -82,6 +85,14 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
   const [isQuickConnectOpen, setIsQuickConnectOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [copiedHost, setCopiedHost] = useState(false);
+  const tabsListRef = useRef<HTMLDivElement>(null);
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (tabsListRef.current) {
+      const scrollAmount = direction === 'left' ? -260 : 260;
+      tabsListRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   // Keep active tab synced if URL query parameter changes
   useEffect(() => {
@@ -364,48 +375,73 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
 
       {/* Main Navigation Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="flex flex-col flex-1 min-h-0">
-        <TabsList className="w-full sm:w-fit max-w-full flex items-center overflow-x-auto no-scrollbar bg-card/80 border border-border p-1.5 rounded-2xl gap-1.5 shadow-lg backdrop-blur-md shrink-0">
-          {NAV_TABS.map((tab) => {
-            const isActive = activeTab === tab.id;
-            const Icon = tab.icon;
-            return (
-              <TabsTrigger
-                key={tab.id}
-                value={tab.id}
-                className={cn(
-                  "relative flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 select-none cursor-pointer",
-                  isActive
-                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent"
-                )}
-              >
-                {/* Active Indicator Pulse Dot */}
-                {isActive && (
-                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor] animate-pulse", tab.accentBg)} />
-                )}
-                
-                <Icon className={cn("h-3.5 w-3.5 transition-colors", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
-                <span>{tab.label}</span>
+        <div className="relative w-full flex items-center shrink-0 group/tabnav">
+          {/* Scroll Left Button */}
+          <button
+            type="button"
+            onClick={() => scrollTabs('left')}
+            className="absolute left-1 z-10 p-1 rounded-xl bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-md backdrop-blur-md opacity-0 group-hover/tabnav:opacity-100 transition-opacity hover:scale-105 active:scale-95"
+            title="Scroll tabs left"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
 
-                {tab.badge !== undefined && (
-                  <span className={cn(
-                    "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono transition-colors",
-                    isActive 
-                      ? "bg-primary-foreground/20 text-primary-foreground font-bold" 
-                      : "bg-muted text-muted-foreground border border-border"
-                  )}>
-                    {tab.badge}
-                  </span>
-                )}
+          <TabsList 
+            ref={tabsListRef} 
+            className="w-full flex items-center justify-start overflow-x-auto scroll-smooth no-scrollbar bg-card/80 border border-border p-1.5 rounded-2xl gap-1.5 shadow-lg backdrop-blur-md shrink-0 px-2.5"
+          >
+            {NAV_TABS.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const Icon = tab.icon;
+              return (
+                <TabsTrigger
+                  key={tab.id}
+                  value={tab.id}
+                  className={cn(
+                    "relative flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 select-none cursor-pointer shrink-0 whitespace-nowrap",
+                    isActive
+                      ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted border border-transparent"
+                  )}
+                >
+                  {/* Active Indicator Pulse Dot */}
+                  {isActive && (
+                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0 shadow-[0_0_8px_currentColor] animate-pulse", tab.accentBg)} />
+                  )}
+                  
+                  <Icon className={cn("h-3.5 w-3.5 transition-colors shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+                  <span className="shrink-0">{tab.label}</span>
 
-                {/* Bottom Active Accent Glow Bar */}
-                {isActive && (
-                  <span className={cn("absolute bottom-0 inset-x-2.5 h-[2px] rounded-full shadow-[0_0_8px_currentColor]", tab.accentBg)} />
-                )}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
+                  {tab.badge !== undefined && (
+                    <span className={cn(
+                      "ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-mono transition-colors shrink-0",
+                      isActive 
+                        ? "bg-primary-foreground/20 text-primary-foreground font-bold" 
+                        : "bg-muted text-muted-foreground border border-border"
+                    )}>
+                      {tab.badge}
+                    </span>
+                  )}
+
+                  {/* Bottom Active Accent Glow Bar */}
+                  {isActive && (
+                    <span className={cn("absolute bottom-0 inset-x-2.5 h-[2px] rounded-full shadow-[0_0_8px_currentColor]", tab.accentBg)} />
+                  )}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+
+          {/* Scroll Right Button */}
+          <button
+            type="button"
+            onClick={() => scrollTabs('right')}
+            className="absolute right-1 z-10 p-1 rounded-xl bg-card/90 border border-border text-muted-foreground hover:text-foreground shadow-md backdrop-blur-md opacity-0 group-hover/tabnav:opacity-100 transition-opacity hover:scale-105 active:scale-95"
+            title="Scroll tabs right"
+          >
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
         
         {/* Tab 1: Overview */}
         <TabsContent value="overview" className="flex-1 mt-6 overflow-y-auto pr-2 space-y-6">
@@ -415,6 +451,12 @@ export const ServerDetail: React.FC<ServerDetailProps> = ({
               onRefreshHealth={() => queryClient.invalidateQueries({ queryKey: ['health', id] })}
             />
           )}
+
+          {/* Active Health Alert Watchdog Banner */}
+          <ServerAlertBanner 
+            serverId={id} 
+            onNavigateToAlerts={() => handleTabChange('alerts')} 
+          />
 
           {/* SSL Certificate Expiry Watchdog Alert Banner */}
           <SslExpiryWatchdogAlert 

@@ -51,6 +51,17 @@ pub async fn get_health(
         );
     }
 
+    // Auto-evaluate alert rules against telemetry snapshot
+    let _ = crate::commands::alerts::evaluate_snapshot_alerts(
+        state.clone(),
+        app_handle.clone(),
+        &server_id,
+        snapshot.cpu_pct as f64,
+        snapshot.ram_pct as f64,
+        snapshot.disk_pct as f64,
+        snapshot.load_avg.0 as f64,
+    ).await;
+
     Ok(snapshot)
 }
 
