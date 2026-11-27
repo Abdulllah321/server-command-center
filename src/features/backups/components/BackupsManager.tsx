@@ -398,6 +398,18 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
     }
 
     const cronExpression = getCronFromPreset(schedCronPreset);
+    let effectiveCloudConfigId: string | undefined;
+    if (schedCloudProvider !== 'none') {
+      const matchingConfigs = cloudConfigs.filter(c => c.provider === schedCloudProvider);
+      const selectedMatch = matchingConfigs.find(c => c.id === schedCloudConfigId) || matchingConfigs[0];
+      if (!selectedMatch) {
+        toast.error(`No ${schedCloudProvider.toUpperCase()} storage account configured`, {
+          description: 'Please add a cloud account in the "Cloud Storage" tab or choose Local Only.',
+        });
+        return;
+      }
+      effectiveCloudConfigId = selectedMatch.id;
+    }
 
     setCreatingSchedule(true);
     try {
@@ -410,7 +422,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
         destination_dir: schedDestinationDir.trim() || '/var/backups',
         retention_count: schedRetention,
         cloud_provider: schedCloudProvider,
-        cloud_config_id: schedCloudProvider !== 'none' ? schedCloudConfigId : undefined,
+        cloud_config_id: effectiveCloudConfigId,
         db_user: schedDbUser.trim() || undefined,
         db_password: schedDbPassword.trim() || undefined,
         db_host: schedDbHost.trim() || undefined,
@@ -440,7 +452,8 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
   };
 
   const handleToggleSchedule = async (schedule: BackupSchedule) => {
-    const newStatus = !schedule.enabled;
+    const currentEnabled = typeof schedule.enabled === 'boolean' ? schedule.enabled : Boolean(schedule.is_active);
+    const newStatus = !currentEnabled;
     try {
       const updated = await toggleBackupSchedule(schedule.id, newStatus, serverId);
       toast.success(newStatus ? 'Schedule enabled in crontab' : 'Schedule paused in crontab');
@@ -466,11 +479,19 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
     setRunningScheduleId(schedule.id);
     try {
       const res = await runBackupScheduleNow(schedule.id, serverId);
-      toast.success('Scheduled backup executed successfully!', {
-        description: `Archive created: ${res.archive_file}`,
-      });
-      loadSchedules();
-      loadBackups();
+      const createdPath = res.backup_record?.destination || res.archive_file;
+      if (res.success) {
+        toast.success(res.message || 'Scheduled backup executed successfully!', {
+          description: createdPath
+            ? `Archive created: ${createdPath}${res.backup_record?.size_bytes ? ` (${formatBytes(res.backup_record.size_bytes)})` : ''}`
+            : (res.output ? res.output.trim().slice(0, 180) : 'Remote backup script completed cleanly.'),
+        });
+      } else {
+        toast.error(res.message || 'Scheduled backup execution failed', {
+          description: res.output ? res.output.trim().slice(-300) : 'Review server backup logs for details.',
+        });
+      }
+      await Promise.all([loadSchedules(), loadBackups()]);
     } catch (err: any) {
       toast.error('Schedule execution failed', { description: err.message || String(err) });
     } finally {
@@ -1084,6 +1105,9 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
             <div className="grid grid-cols-1 gap-3.5">
               {schedules.map(s => {
                 const isRunning = runningScheduleId === s.id;
+                const cloudProvider = (s.cloud_provider || s.storage_provider || 'none').toLowerCase();
+                const isScheduleEnabled = typeof s.enabled === 'boolean' ? s.enabled : Boolean(s.is_active);
+                const scriptDisplayPath = s.remote_script_path || `/var/scripts/scc_backup_${s.id}.sh`;
 
                 return (
                   <Card 
@@ -1105,7 +1129,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                             <Badge className="text-xs bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 font-medium">
                               {formatCronHuman(s.cron_expression)}
                             </Badge>
-                            {s.enabled ? (
+                            {isScheduleEnabled ? (
                               <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
                                 <Check className="h-3 w-3" /> Active Crontab
                               </span>
@@ -1123,9 +1147,9 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                             <span className="text-muted-foreground/60">•</span>
                             <span>Retain: {s.retention_count} dumps</span>
                             <span className="text-muted-foreground/60">•</span>
-                            {s.cloud_provider !== 'none' ? (
+                            {cloudProvider !== 'none' ? (
                               <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400 font-semibold">
-                                <Cloud className="h-3 w-3" /> Offsite {s.cloud_provider.toUpperCase()}
+                                <Cloud className="h-3 w-3" /> Offsite {cloudProvider.toUpperCase()}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">Local Only</span>
@@ -1133,7 +1157,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                           </div>
 
                           <div className="text-[11px] text-muted-foreground flex items-center gap-2">
-                            <span>Script: <code className="font-mono text-foreground">/var/scripts/scc_backup_{s.id.slice(0, 8)}.sh</code></span>
+                            <span>Script: <code className="font-mono text-foreground">{scriptDisplayPath}</code></span>
                             {s.last_run_at && (
                               <>
                                 <span>•</span>
@@ -1143,10 +1167,12 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                                   className={`text-[10px] py-0 px-1.5 ${
                                     s.last_status === 'success' 
                                       ? 'text-emerald-600 border-emerald-500/30 bg-emerald-500/10' 
+                                      : s.last_status === 'active' || s.last_status === 'running'
+                                      ? 'text-indigo-500 border-indigo-500/30 bg-indigo-500/10'
                                       : 'text-red-500 border-red-500/30 bg-red-500/10'
                                   }`}
                                 >
-                                  {s.last_status}
+                                  {s.last_status || 'unknown'}
                                 </Badge>
                               </>
                             )}
@@ -1158,10 +1184,10 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                       <div className="flex items-center gap-3 self-end md:self-center">
                         <div className="flex items-center gap-2 border-r border-border pr-3">
                           <span className="text-xs text-muted-foreground font-medium">
-                            {s.enabled ? 'Active' : 'Paused'}
+                            {isScheduleEnabled ? 'Active' : 'Paused'}
                           </span>
                           <Switch 
-                            checked={s.enabled}
+                            checked={isScheduleEnabled}
                             onCheckedChange={() => handleToggleSchedule(s)}
                           />
                         </div>
@@ -2129,7 +2155,11 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                       ? 'bg-amber-600 text-white hover:bg-amber-500' 
                       : 'border-border bg-background text-foreground hover:bg-accent'
                   }`}
-                  onClick={() => setSchedCloudProvider('s3')}
+                  onClick={() => {
+                    setSchedCloudProvider('s3');
+                    const match = cloudConfigs.find(c => c.provider === 's3');
+                    setSchedCloudConfigId(match?.id || '');
+                  }}
                 >
                   Amazon S3 / R2
                 </Button>
@@ -2142,7 +2172,11 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                       ? 'bg-blue-600 text-white hover:bg-blue-500' 
                       : 'border-border bg-background text-foreground hover:bg-accent'
                   }`}
-                  onClick={() => setSchedCloudProvider('dropbox')}
+                  onClick={() => {
+                    setSchedCloudProvider('dropbox');
+                    const match = cloudConfigs.find(c => c.provider === 'dropbox');
+                    setSchedCloudConfigId(match?.id || '');
+                  }}
                 >
                   Dropbox
                 </Button>
@@ -2424,7 +2458,7 @@ export const BackupsManager: React.FC<BackupsManagerProps> = ({ serverId }) => {
                 >
                   {cloudConfigs.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.provider.toUpperCase()})
+                      {c.name} ({(c.provider || 'cloud').toUpperCase()})
                     </option>
                   ))}
                 </select>

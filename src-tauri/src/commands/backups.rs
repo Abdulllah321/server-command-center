@@ -791,13 +791,80 @@ pub struct BackupSchedule {
     pub db_port: Option<u16>,
     pub custom_command: Option<String>,
     pub storage_provider: String, // "none", "s3", "dropbox"
+    #[serde(default)]
+    pub cloud_provider: String,   // Alias for frontend compatibility
     pub storage_config: Option<String>,
     pub is_active: bool,
+    #[serde(default)]
+    pub enabled: bool,            // Alias for frontend compatibility
     pub remote_script_path: Option<String>,
     pub last_run_at: Option<String>,
     pub last_status: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn map_backup_schedule_row(r: &rusqlite::Row) -> rusqlite::Result<BackupSchedule> {
+    let active_int: i32 = r.get(15)?;
+    let storage_provider: String = r.get(13)?;
+    let is_active = active_int != 0;
+    Ok(BackupSchedule {
+        id: r.get(0)?,
+        server_id: r.get(1)?,
+        name: r.get(2)?,
+        target_type: r.get(3)?,
+        target_name: r.get(4)?,
+        cron_expression: r.get(5)?,
+        destination_dir: r.get(6)?,
+        retention_count: r.get(7)?,
+        db_user: r.get(8)?,
+        db_password: r.get(9)?,
+        db_host: r.get(10)?,
+        db_port: r.get(11)?,
+        custom_command: r.get(12)?,
+        cloud_provider: storage_provider.clone(),
+        storage_provider,
+        storage_config: r.get(14)?,
+        enabled: is_active,
+        is_active,
+        remote_script_path: r.get(16)?,
+        last_run_at: r.get(17)?,
+        last_status: r.get(18)?,
+        created_at: r.get(19)?,
+        updated_at: r.get(20)?,
+    })
+}
+
+fn fetch_backup_schedule_by_id(
+    conn: &rusqlite::Connection,
+    schedule_id: &str,
+    server_id: Option<&str>,
+) -> CommandResult<BackupSchedule> {
+    let sql = if server_id.is_some() {
+        "SELECT id, server_id, name, target_type, target_name, cron_expression,
+                destination_dir, retention_count, db_user, db_password, db_host,
+                db_port, custom_command, storage_provider, storage_config,
+                is_active, remote_script_path, last_run_at, last_status,
+                created_at, updated_at
+         FROM backup_schedules
+         WHERE id = ?1 AND server_id = ?2"
+    } else {
+        "SELECT id, server_id, name, target_type, target_name, cron_expression,
+                destination_dir, retention_count, db_user, db_password, db_host,
+                db_port, custom_command, storage_provider, storage_config,
+                is_active, remote_script_path, last_run_at, last_status,
+                created_at, updated_at
+         FROM backup_schedules
+         WHERE id = ?1"
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| CommandError::Database(e.to_string()))?;
+
+    if let Some(sid) = server_id {
+        stmt.query_row(rusqlite::params![schedule_id, sid], map_backup_schedule_row)
+    } else {
+        stmt.query_row(rusqlite::params![schedule_id], map_backup_schedule_row)
+    }
+    .map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -857,6 +924,7 @@ pub struct ScheduleRunResult {
     pub success: bool,
     pub message: String,
     pub output: String,
+    pub archive_file: Option<String>,
     pub backup_record: Option<BackupRecord>,
 }
 
@@ -1022,7 +1090,10 @@ tar -czf "$DEST_FILE" -C "$(dirname "{target}")" "$(basename "{target}")""#,
         if let Some(cfg_str) = storage_config_json {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(cfg_str) {
                 let token = v["access_token"].as_str().unwrap_or("");
-                let path = v["path"].as_str().unwrap_or("/ServerCommandCenter/Backups");
+                let path = v["path"].as_str()
+                    .or_else(|| v["prefix"].as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("/ServerCommandCenter/Backups");
                 if !token.is_empty() {
                     cloud_logic = format!(
                         r#"
@@ -1196,6 +1267,8 @@ DEST_FILE="${{DEST_DIR}}/{prefix}_{sanitized_target}_${{TIMESTAMP}}.{ext}"
 STATUS_FILE="{script_dir}/scc_backup_{schedule_id}.status"
 MANIFEST_FILE="{script_dir}/scc_backup_manifest.jsonl"
 
+trap 'ERR_CODE=$?; echo "{{\"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"status\": \"failed\", \"error\": \"Command exited with code $ERR_CODE\"}}" > "$STATUS_FILE"' ERR
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting automated backup for {target_name}..."
 
 # 1. Execute database / filesystem dump
@@ -1276,32 +1349,7 @@ pub async fn list_backup_schedules(
              ORDER BY created_at DESC"
         ).map_err(|e| CommandError::Database(e.to_string()))?;
 
-        let rows = stmt.query_map([&server_id], |r| {
-            let active_int: i32 = r.get(15)?;
-            Ok(BackupSchedule {
-                id: r.get(0)?,
-                server_id: r.get(1)?,
-                name: r.get(2)?,
-                target_type: r.get(3)?,
-                target_name: r.get(4)?,
-                cron_expression: r.get(5)?,
-                destination_dir: r.get(6)?,
-                retention_count: r.get(7)?,
-                db_user: r.get(8)?,
-                db_password: r.get(9)?,
-                db_host: r.get(10)?,
-                db_port: r.get(11)?,
-                custom_command: r.get(12)?,
-                storage_provider: r.get(13)?,
-                storage_config: r.get(14)?,
-                is_active: active_int != 0,
-                remote_script_path: r.get(16)?,
-                last_run_at: r.get(17)?,
-                last_status: r.get(18)?,
-                created_at: r.get(19)?,
-                updated_at: r.get(20)?,
-            })
-        }).map_err(|e| CommandError::Database(e.to_string()))?;
+        let rows = stmt.query_map([&server_id], map_backup_schedule_row).map_err(|e| CommandError::Database(e.to_string()))?;
 
         let mut res = Vec::new();
         for row in rows {
@@ -1338,11 +1386,18 @@ fi
                             ) {
                                 let size = v["size_bytes"].as_i64();
                                 let id = format!("cron_{}", &dest.replace(['/', '\\', '.', '_'], ""));
-                                let _ = conn.execute(
-                                    "INSERT OR IGNORE INTO backups (id, server_id, target, destination, size_bytes, status, created_at)
-                                     VALUES (?1, ?2, ?3, ?4, ?5, 'success', ?6)",
-                                    rusqlite::params![id, server_id, tgt, dest, size, ts]
-                                );
+                                let already_exists: bool = conn.query_row(
+                                    "SELECT EXISTS(SELECT 1 FROM backups WHERE server_id = ?1 AND destination = ?2)",
+                                    rusqlite::params![server_id, dest],
+                                    |r| r.get(0),
+                                ).unwrap_or(false);
+                                if !already_exists {
+                                    let _ = conn.execute(
+                                        "INSERT OR IGNORE INTO backups (id, server_id, target, destination, size_bytes, status, created_at)
+                                         VALUES (?1, ?2, ?3, ?4, ?5, 'success', ?6)",
+                                        rusqlite::params![id, server_id, tgt, dest, size, ts]
+                                    );
+                                }
                             }
                         }
                     }
@@ -1352,10 +1407,19 @@ fi
 
         // Read real-time status files for each schedule
         for sched in &mut schedules {
-            let status_cmd = format!(
-                "cat \"/var/scripts/scc_backup_{}.status\" 2>/dev/null || cat \"$HOME/.scc_backups/scc_backup_{}.status\" 2>/dev/null || true",
-                sched.id, sched.id
-            );
+            let explicit_status = sched.remote_script_path.as_deref()
+                .map(|p| format!("{}.status", p.trim_end_matches(".sh")));
+            let status_cmd = if let Some(ref exp) = explicit_status {
+                format!(
+                    "cat \"{}\" 2>/dev/null || cat \"/var/scripts/scc_backup_{}.status\" 2>/dev/null || cat \"$HOME/.scc_backups/scc_backup_{}.status\" 2>/dev/null || true",
+                    exp, sched.id, sched.id
+                )
+            } else {
+                format!(
+                    "cat \"/var/scripts/scc_backup_{}.status\" 2>/dev/null || cat \"$HOME/.scc_backups/scc_backup_{}.status\" 2>/dev/null || true",
+                    sched.id, sched.id
+                )
+            };
             if let Ok(status_out) = exec_ssh_command_full(&mut session, &status_cmd, Duration::from_secs(5)).await {
                 let txt = status_out.stdout.trim();
                 if !txt.is_empty() {
@@ -1554,8 +1618,10 @@ crontab -l 2>/dev/null | grep "SCC_BACKUP_{id}"
         db_host: options.db_host,
         db_port: options.db_port,
         custom_command: options.custom_command,
+        cloud_provider: resolved_provider.clone(),
         storage_provider: resolved_provider,
         storage_config: resolved_config_json,
+        enabled: true,
         is_active: true,
         remote_script_path: Some(script_path),
         last_run_at: None,
@@ -1580,57 +1646,7 @@ pub async fn toggle_backup_schedule(
     // 1. Fetch existing schedule from DB
     let sched = {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        let sql = if server_id.is_some() {
-            "SELECT id, server_id, name, target_type, target_name, cron_expression,
-                    destination_dir, retention_count, db_user, db_password, db_host,
-                    db_port, custom_command, storage_provider, storage_config,
-                    is_active, remote_script_path, last_run_at, last_status,
-                    created_at, updated_at
-             FROM backup_schedules
-             WHERE id = ?1 AND server_id = ?2"
-        } else {
-            "SELECT id, server_id, name, target_type, target_name, cron_expression,
-                    destination_dir, retention_count, db_user, db_password, db_host,
-                    db_port, custom_command, storage_provider, storage_config,
-                    is_active, remote_script_path, last_run_at, last_status,
-                    created_at, updated_at
-             FROM backup_schedules
-             WHERE id = ?1"
-        };
-        let mut stmt = conn.prepare(sql).map_err(|e| CommandError::Database(e.to_string()))?;
-
-        let map_row = |r: &rusqlite::Row| {
-            let active_int: i32 = r.get(15)?;
-            Ok(BackupSchedule {
-                id: r.get(0)?,
-                server_id: r.get(1)?,
-                name: r.get(2)?,
-                target_type: r.get(3)?,
-                target_name: r.get(4)?,
-                cron_expression: r.get(5)?,
-                destination_dir: r.get(6)?,
-                retention_count: r.get(7)?,
-                db_user: r.get(8)?,
-                db_password: r.get(9)?,
-                db_host: r.get(10)?,
-                db_port: r.get(11)?,
-                custom_command: r.get(12)?,
-                storage_provider: r.get(13)?,
-                storage_config: r.get(14)?,
-                is_active: active_int != 0,
-                remote_script_path: r.get(16)?,
-                last_run_at: r.get(17)?,
-                last_status: r.get(18)?,
-                created_at: r.get(19)?,
-                updated_at: r.get(20)?,
-            })
-        };
-
-        if let Some(ref sid) = server_id {
-            stmt.query_row(rusqlite::params![&schedule_id, sid], map_row)
-        } else {
-            stmt.query_row(rusqlite::params![&schedule_id], map_row)
-        }.map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
+        fetch_backup_schedule_by_id(&conn, &schedule_id, server_id.as_deref())?
     };
 
     let target_server_id = sched.server_id.clone();
@@ -1701,6 +1717,7 @@ fi
 
     let mut updated = sched;
     updated.is_active = should_enable;
+    updated.enabled = should_enable;
     updated.updated_at = now_iso;
     Ok(updated)
 }
@@ -1787,57 +1804,7 @@ pub async fn run_backup_schedule_now(
     // 1. Fetch schedule
     let sched = {
         let conn = state.db.lock().map_err(|e| CommandError::Database(e.to_string()))?;
-        let sql = if server_id.is_some() {
-            "SELECT id, server_id, name, target_type, target_name, cron_expression,
-                    destination_dir, retention_count, db_user, db_password, db_host,
-                    db_port, custom_command, storage_provider, storage_config,
-                    is_active, remote_script_path, last_run_at, last_status,
-                    created_at, updated_at
-             FROM backup_schedules
-             WHERE id = ?1 AND server_id = ?2"
-        } else {
-            "SELECT id, server_id, name, target_type, target_name, cron_expression,
-                    destination_dir, retention_count, db_user, db_password, db_host,
-                    db_port, custom_command, storage_provider, storage_config,
-                    is_active, remote_script_path, last_run_at, last_status,
-                    created_at, updated_at
-             FROM backup_schedules
-             WHERE id = ?1"
-        };
-        let mut stmt = conn.prepare(sql).map_err(|e| CommandError::Database(e.to_string()))?;
-
-        let map_row = |r: &rusqlite::Row| {
-            let active_int: i32 = r.get(15)?;
-            Ok(BackupSchedule {
-                id: r.get(0)?,
-                server_id: r.get(1)?,
-                name: r.get(2)?,
-                target_type: r.get(3)?,
-                target_name: r.get(4)?,
-                cron_expression: r.get(5)?,
-                destination_dir: r.get(6)?,
-                retention_count: r.get(7)?,
-                db_user: r.get(8)?,
-                db_password: r.get(9)?,
-                db_host: r.get(10)?,
-                db_port: r.get(11)?,
-                custom_command: r.get(12)?,
-                storage_provider: r.get(13)?,
-                storage_config: r.get(14)?,
-                is_active: active_int != 0,
-                remote_script_path: r.get(16)?,
-                last_run_at: r.get(17)?,
-                last_status: r.get(18)?,
-                created_at: r.get(19)?,
-                updated_at: r.get(20)?,
-            })
-        };
-
-        if let Some(ref sid) = server_id {
-            stmt.query_row(rusqlite::params![&schedule_id, sid], map_row)
-        } else {
-            stmt.query_row(rusqlite::params![&schedule_id], map_row)
-        }.map_err(|_| CommandError::NotFound(format!("Backup schedule {} not found", schedule_id)))?
+        fetch_backup_schedule_by_id(&conn, &schedule_id, server_id.as_deref())?
     };
 
     let target_server_id = sched.server_id.clone();
@@ -1854,28 +1821,45 @@ pub async fn run_backup_schedule_now(
     let run_out = exec_ssh_command_full(&mut session, &exec_cmd, Duration::from_secs(360)).await?;
 
     let is_success = run_out.exit_status.unwrap_or(0) == 0;
-    let output = if !run_out.stdout.is_empty() { run_out.stdout } else { run_out.stderr };
+    let output = match (run_out.stdout.trim().is_empty(), run_out.stderr.trim().is_empty()) {
+        (false, false) => format!("{}\n{}", run_out.stdout.trim(), run_out.stderr.trim()),
+        (false, true) => run_out.stdout,
+        (true, false) => run_out.stderr,
+        (true, true) => String::new(),
+    };
     let status_label = if is_success { "success" } else { "failed" };
     let now_iso = chrono::Utc::now().to_rfc3339();
 
     // 4. Read created backup file from status file
     let mut created_backup_record = None;
+    let mut archive_file_path: Option<String> = None;
     let status_cmd = format!("cat \"{}.status\" 2>/dev/null || true", script_path.trim_end_matches(".sh"));
     if let Ok(st_out) = exec_ssh_command_full(&mut session, &status_cmd, Duration::from_secs(5)).await {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(st_out.stdout.trim()) {
             if let Some(dest_file) = v["file"].as_str() {
                 let size = v["size"].as_i64();
                 let backup_id = Uuid::new_v4().to_string();
+                let is_cloud = is_success && sched.storage_provider != "none" && !output.contains("WARNING:");
+                archive_file_path = Some(dest_file.to_string());
 
                 if let Ok(conn) = state.db.lock() {
                     let _ = conn.execute(
-                        "INSERT INTO backups (id, server_id, target, destination, size_bytes, status, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, 'success', ?6)",
-                        rusqlite::params![backup_id, target_server_id, sched.target_name, dest_file, size, now_iso]
+                        "INSERT INTO backups (id, server_id, target, destination, size_bytes, status, created_at, cloud_uploaded, cloud_provider, cloud_uploaded_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, 'success', ?6, ?7, ?8, ?9)",
+                        rusqlite::params![
+                            backup_id,
+                            target_server_id,
+                            sched.target_name,
+                            dest_file,
+                            size,
+                            now_iso,
+                            if is_cloud { 1 } else { 0 },
+                            if is_cloud { Some(sched.storage_provider.as_str()) } else { None },
+                            if is_cloud { Some(now_iso.as_str()) } else { None },
+                        ]
                     );
                 }
 
-                let is_cloud = sched.storage_provider != "none";
                 created_backup_record = Some(BackupRecord {
                     id: backup_id,
                     server_id: target_server_id.clone(),
@@ -1919,6 +1903,7 @@ pub async fn run_backup_schedule_now(
             "Scheduled backup execution failed. Review output logs.".into()
         },
         output,
+        archive_file: archive_file_path,
         backup_record: created_backup_record,
     })
 }
@@ -2170,7 +2155,11 @@ pub async fn upload_backup_to_cloud(
         let v: serde_json::Value = serde_json::from_str(&target_config_json)
             .map_err(|e| CommandError::Validation(format!("Invalid Dropbox JSON config: {}", e)))?;
         let token = v["access_token"].as_str().unwrap_or("").trim();
-        let folder = v["path"].as_str().unwrap_or("/ServerCommandCenter/Backups").trim();
+        let folder = v["path"].as_str()
+            .or_else(|| v["prefix"].as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("/ServerCommandCenter/Backups")
+            .trim();
 
         if token.is_empty() {
             return Err(CommandError::Validation("Dropbox token cannot be empty".into()));

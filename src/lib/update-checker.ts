@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.3.3';
+export const APP_VERSION = '1.3.4';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,20 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.4': {
+    summary: 'Backup Schedule & Run Crash Fix: Resolved the `Cannot read properties of undefined (reading \'toUpperCase\')` error when opening Backup Cron Schedules or fetching schedule status/run results, unified Rust-to-Frontend schedule contract serialization, added bash ERR status trapping, and improved Run Now diagnostics.',
+    highlights: [
+      'Resolved Backup Schedule Render Crash: Aligned `BackupSchedule` serialization (`cloud_provider` alongside `storage_provider`, `enabled` alongside `is_active`) and guarded `.toUpperCase()` calls in `BackupsManager` so viewing or creating backup schedules never crashes the Server View.',
+      'Fixed Run Now Feedback & Archive Reporting: Matched `ScheduleRunResult` contract (`backup_record`, `archive_file`, `output`), added combined stdout/stderr diagnostics on failure, and added a bash `ERR` trap so failed cron runs always write `.status` files.',
+      'Prevented Duplicate Manifest Entries: Deduplicated backup snapshot inserts when syncing `scc_backup_manifest.jsonl` after manual schedule runs.',
+      'Smart Cloud Account Auto-Selection: Switching between S3 and Dropbox in the New Cron Schedule dialog now automatically binds an account matching the chosen provider.'
+    ],
+    fixes: [
+      'Fixed `TypeError: Cannot read properties of undefined (reading \'toUpperCase\')` in `BackupsManager` schedule cards.',
+      'Fixed active backup schedules appearing as Paused due to `is_active` vs `enabled` field mismatch.',
+      'Fixed Dropbox `prefix` vs `path` configuration field resolution during scheduled and manual cloud uploads.'
+    ]
+  },
   'v1.3.3': {
     summary: 'Native OS Desktop Notifications & UI Stacking Context Fixes: Integrated official Tauri Notification Plugin for native Windows Action Center, macOS, and Linux desktop toast alerts even when the app is minimized, fixed TopBar dropdown clipping over cockpit controls, and added active auto-centering with dynamic scroll masks for sub-navigation tabs.',
     highlights: [

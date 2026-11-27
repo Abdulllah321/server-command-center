@@ -399,10 +399,14 @@ export interface BackupSchedule {
   destination_dir: string;
   retention_count: number;
   cloud_provider: 'none' | 's3' | 'dropbox';
-  cloud_config_id: string | null;
+  storage_provider?: 'none' | 's3' | 'dropbox' | string;
+  storage_config?: string | null;
+  cloud_config_id?: string | null;
   enabled: boolean;
+  is_active?: boolean;
+  remote_script_path?: string | null;
   last_run_at: string | null;
-  last_status: 'success' | 'failed' | 'running' | null;
+  last_status: 'success' | 'failed' | 'running' | 'active' | string | null;
   created_at: string;
   updated_at: string;
 }
@@ -457,15 +461,30 @@ export interface CloudUploadResult {
 export interface ScheduleRunResult {
   success: boolean;
   message: string;
-  archive_file: string;
+  output?: string;
+  archive_file?: string | null;
+  backup_record?: BackupRecord | null;
 }
 
+const normalizeBackupSchedule = (raw: any): BackupSchedule => {
+  const provider = (raw?.cloud_provider ?? raw?.storage_provider ?? 'none') as 'none' | 's3' | 'dropbox';
+  const active = typeof raw?.enabled === 'boolean' ? raw.enabled : Boolean(raw?.is_active);
+  return {
+    ...raw,
+    cloud_provider: provider || 'none',
+    storage_provider: raw?.storage_provider ?? provider ?? 'none',
+    enabled: active,
+    is_active: active,
+  };
+};
+
 export const listBackupSchedules = async (serverId: string): Promise<BackupSchedule[]> => {
-  return await invoke('list_backup_schedules', { serverId, server_id: serverId });
+  const items = await invoke<any[]>('list_backup_schedules', { serverId, server_id: serverId });
+  return Array.isArray(items) ? items.map(normalizeBackupSchedule) : [];
 };
 
 export const createBackupSchedule = async (options: CreateBackupScheduleOptions): Promise<BackupSchedule> => {
-  return await invoke('create_backup_schedule', { 
+  const created = await invoke<any>('create_backup_schedule', { 
     serverId: options.server_id,
     server_id: options.server_id,
     options: {
@@ -474,10 +493,11 @@ export const createBackupSchedule = async (options: CreateBackupScheduleOptions)
       storage_config: options.storage_config,
     }
   });
+  return normalizeBackupSchedule(created);
 };
 
 export const toggleBackupSchedule = async (scheduleId: string, enabled: boolean, serverId?: string): Promise<BackupSchedule> => {
-  return await invoke('toggle_backup_schedule', { 
+  const updated = await invoke<any>('toggle_backup_schedule', { 
     scheduleId, 
     schedule_id: scheduleId,
     enable: enabled,
@@ -485,6 +505,7 @@ export const toggleBackupSchedule = async (scheduleId: string, enabled: boolean,
     serverId: serverId ?? null,
     server_id: serverId ?? null,
   });
+  return normalizeBackupSchedule(updated);
 };
 
 export const deleteBackupSchedule = async (scheduleId: string, serverId?: string): Promise<void> => {

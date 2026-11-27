@@ -212,10 +212,14 @@ export interface BackupSchedule {
   destination_dir: string;
   retention_count: number;
   cloud_provider: 'none' | 's3' | 'dropbox';
-  cloud_config_id: string | null;
+  storage_provider?: 'none' | 's3' | 'dropbox' | string;
+  storage_config?: string | null;
+  cloud_config_id?: string | null;
   enabled: boolean;
+  is_active?: boolean;
+  remote_script_path?: string | null;
   last_run_at: string | null;
-  last_status: 'success' | 'failed' | 'running' | null;
+  last_status: 'success' | 'failed' | 'running' | 'active' | string | null;
   created_at: string;
   updated_at: string;
 }
