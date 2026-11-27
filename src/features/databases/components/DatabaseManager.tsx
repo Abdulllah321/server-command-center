@@ -21,7 +21,10 @@ import {
   Eye,
   EyeOff,
   Zap,
-  Trash2
+  Trash2,
+  AlertTriangle,
+  Pencil,
+  Check
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -163,8 +166,11 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
   const [activeTab, setActiveTab] = useState<'query' | 'connections' | 'schema'>('query');
   const [engine, setEngine] = useState<DatabaseEngine>('postgres');
   const [selectedDb, setSelectedDb] = useState<string>('postgres');
-  const [availableDbs, setAvailableDbs] = useState<string[]>([]);
+  const [availableDbs, setAvailableDbs] = useState<string[]>(['postgres']);
   const [isLoadingDbs, setIsLoadingDbs] = useState<boolean>(false);
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [editingCustomDb, setEditingCustomDb] = useState<boolean>(false);
+  const [customDbDraft, setCustomDbDraft] = useState<string>('');
 
   // Credentials drawer
   const [showCreds, setShowCreds] = useState<boolean>(false);
@@ -193,6 +199,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
   // Connections state
   const [connectionStats, setConnectionStats] = useState<DatabaseConnectionStats | null>(null);
   const [isLoadingConnections, setIsLoadingConnections] = useState<boolean>(false);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0); // 0 = off, 5 = 5s
   const [connectionFilter, setConnectionFilter] = useState<string>('');
   const [killingConnId, setKillingConnId] = useState<string | null>(null);
@@ -200,6 +207,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
   // Schema state
   const [schemaSummary, setSchemaSummary] = useState<DatabaseSchemaSummary | null>(null);
   const [isLoadingSchema, setIsLoadingSchema] = useState<boolean>(false);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
   const [schemaFilter, setSchemaFilter] = useState<string>('');
 
   // Load history from localStorage
@@ -226,33 +234,60 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
     });
   };
 
+  const getDefaultDbForEngine = (eng: DatabaseEngine): string =>
+    eng === 'mysql' ? 'mysql' : eng === 'redis' ? 'db0' : 'postgres';
+
+  const handleEngineSwitch = (nextEngine: DatabaseEngine) => {
+    const defDb = getDefaultDbForEngine(nextEngine);
+    setEngine(nextEngine);
+    setSelectedDb(defDb);
+    setAvailableDbs([defDb]);
+    setEditingCustomDb(false);
+    setDbError(null);
+    setSchemaSummary(null);
+    setSchemaError(null);
+    setConnectionStats(null);
+    setConnectionsError(null);
+    setQueryResult(null);
+    setQueryError(null);
+  };
+
   // Fetch databases list
-  const fetchDatabases = useCallback(async () => {
-    if (!isOnline) return;
+  const fetchDatabases = useCallback(async (forceAttempt = false) => {
+    if (!isOnline && !forceAttempt) return;
     setIsLoadingDbs(true);
+    setDbError(null);
+    const fallback = getDefaultDbForEngine(engine);
     try {
       const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
-      const dbs = await listServerDatabases(serverId, {
+      const rawDbs = await listServerDatabases(serverId, {
         target_type: engine,
-        db_host: dbHost || undefined,
-        db_port: portNum,
-        db_user: dbUser || undefined,
+        db_host: dbHost.trim() || undefined,
+        db_port: portNum && !Number.isNaN(portNum) ? portNum : undefined,
+        db_user: dbUser.trim() || undefined,
         db_password: dbPass || undefined,
       });
-      if (dbs && dbs.length > 0) {
-        setAvailableDbs(dbs);
+
+      const dbs = engine === 'redis'
+        ? (rawDbs || []).filter((d) => d !== 'dump.rdb')
+        : (rawDbs || []);
+
+      if (dbs.length > 0) {
+        const merged = [...dbs];
+        if (selectedDb && !merged.includes(selectedDb) && selectedDb !== fallback) {
+          merged.push(selectedDb);
+        }
+        setAvailableDbs(merged);
         if (!dbs.includes(selectedDb)) {
           setSelectedDb(dbs[0]);
         }
       } else {
-        const fallback = engine === 'mysql' ? 'mysql' : engine === 'redis' ? 'db0' : 'postgres';
-        setAvailableDbs([fallback]);
-        setSelectedDb(fallback);
+        setAvailableDbs((prev) => (prev.length > 0 && prev.includes(selectedDb) ? prev : [fallback]));
       }
-    } catch {
-      const fallback = engine === 'mysql' ? 'mysql' : engine === 'redis' ? 'db0' : 'postgres';
-      setAvailableDbs([fallback]);
-      setSelectedDb(fallback);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      setDbError(msg);
+      setAvailableDbs((prev) => (prev.includes(selectedDb) ? prev : [selectedDb || fallback]));
     } finally {
       setIsLoadingDbs(false);
     }
@@ -260,7 +295,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
 
   useEffect(() => {
     fetchDatabases();
-  }, [engine]);
+  }, [serverId, isOnline, engine]);
 
   // Adjust default query when engine changes
   useEffect(() => {
@@ -288,18 +323,18 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
 
     try {
       const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
-      const creds = (dbHost || dbPort || dbUser || dbPass) ? {
-        host: dbHost || undefined,
-        port: portNum,
-        user: dbUser || undefined,
+      const creds = (dbHost.trim() || dbPort.trim() || dbUser.trim() || dbPass) ? {
+        host: dbHost.trim() || undefined,
+        port: portNum && !Number.isNaN(portNum) ? portNum : undefined,
+        user: dbUser.trim() || undefined,
         password: dbPass || undefined,
       } : undefined;
 
       let confirmationToken: string | undefined = undefined;
 
-      // Destructive check
-      const upper = q.toUpperCase();
-      const isDestructive = ['DROP ', 'TRUNCATE ', 'DELETE ', 'UPDATE ', 'ALTER ', 'FLUSHDB', 'FLUSHALL'].some(
+      // Destructive check (normalized whitespace synced with backend)
+      const upper = q.replace(/\s+/g, ' ').trim().toUpperCase();
+      const isDestructive = ['DROP ', 'TRUNCATE ', 'DELETE ', 'UPDATE ', 'ALTER ', 'GRANT ', 'REVOKE ', 'FLUSHDB', 'FLUSHALL', 'SHUTDOWN'].some(
         tok => upper.startsWith(tok) || upper.includes(` ${tok}`)
       );
 
@@ -360,27 +395,35 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
     }
   };
 
-  // Connections loader
-  const fetchConnections = useCallback(async () => {
-    if (!isOnline) return;
-    setIsLoadingConnections(true);
-    try {
-      const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
-      const creds = (dbHost || dbPort || dbUser || dbPass) ? {
-        host: dbHost || undefined,
-        port: portNum,
-        user: dbUser || undefined,
-        password: dbPass || undefined,
-      } : undefined;
+  const buildCreds = useCallback(() => {
+    const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
+    if (!dbHost.trim() && !dbPort.trim() && !dbUser.trim() && !dbPass) {
+      return undefined;
+    }
+    return {
+      host: dbHost.trim() || undefined,
+      port: portNum && !Number.isNaN(portNum) ? portNum : undefined,
+      user: dbUser.trim() || undefined,
+      password: dbPass || undefined,
+    };
+  }, [dbHost, dbPort, dbUser, dbPass]);
 
-      const stats = await getDatabaseConnections(serverId, engine, selectedDb, creds);
+  // Connections loader
+  const fetchConnections = useCallback(async (forceAttempt = false) => {
+    if (!isOnline && !forceAttempt) return;
+    setIsLoadingConnections(true);
+    setConnectionsError(null);
+    try {
+      const stats = await getDatabaseConnections(serverId, engine, selectedDb, buildCreds());
       setConnectionStats(stats);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to fetch database connections');
+      const msg = err?.message || String(err);
+      setConnectionsError(msg);
+      toast.error(msg || 'Failed to fetch database connections');
     } finally {
       setIsLoadingConnections(false);
     }
-  }, [serverId, isOnline, engine, selectedDb, dbHost, dbPort, dbUser, dbPass]);
+  }, [serverId, isOnline, engine, selectedDb, buildCreds]);
 
   useEffect(() => {
     if (activeTab === 'connections') {
@@ -407,17 +450,9 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
         [serverId, connId]
       );
 
-      const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
-      const creds = (dbHost || dbPort || dbUser || dbPass) ? {
-        host: dbHost || undefined,
-        port: portNum,
-        user: dbUser || undefined,
-        password: dbPass || undefined,
-      } : undefined;
-
-      await terminateDatabaseConnection(serverId, engine, connId, creds, token);
+      await terminateDatabaseConnection(serverId, engine, connId, buildCreds(), token);
       toast.success(`Connection #${connId} terminated successfully`);
-      fetchConnections();
+      fetchConnections(true);
     } catch (err: any) {
       toast.error(err?.message || `Failed to kill connection #${connId}`);
     } finally {
@@ -426,32 +461,45 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
   };
 
   // Schema tables loader
-  const fetchSchemaTables = useCallback(async () => {
-    if (!isOnline) return;
+  const fetchSchemaTables = useCallback(async (forceAttempt = false) => {
+    if (!isOnline && !forceAttempt) return;
     setIsLoadingSchema(true);
+    setSchemaError(null);
     try {
-      const portNum = dbPort ? parseInt(dbPort, 10) : undefined;
-      const creds = (dbHost || dbPort || dbUser || dbPass) ? {
-        host: dbHost || undefined,
-        port: portNum,
-        user: dbUser || undefined,
-        password: dbPass || undefined,
-      } : undefined;
-
-      const schema = await getDatabaseSchemaTables(serverId, engine, selectedDb, creds);
+      const schema = await getDatabaseSchemaTables(serverId, engine, selectedDb, buildCreds());
       setSchemaSummary(schema);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to load database tables');
+      const msg = err?.message || String(err);
+      setSchemaError(msg);
+      toast.error(msg || 'Failed to load database tables');
     } finally {
       setIsLoadingSchema(false);
     }
-  }, [serverId, isOnline, engine, selectedDb, dbHost, dbPort, dbUser, dbPass]);
+  }, [serverId, isOnline, engine, selectedDb, buildCreds]);
 
   useEffect(() => {
     if (activeTab === 'schema') {
       fetchSchemaTables();
     }
   }, [activeTab, fetchSchemaTables]);
+
+  const handleApplyCustomDb = () => {
+    const trimmed = customDbDraft.trim();
+    if (trimmed) {
+      setAvailableDbs((prev) => (prev.includes(trimmed) ? prev : [trimmed, ...prev]));
+      setSelectedDb(trimmed);
+    }
+    setEditingCustomDb(false);
+  };
+
+  const handleApplyAuthAndReconnect = async () => {
+    await fetchDatabases(true);
+    if (activeTab === 'schema') {
+      await fetchSchemaTables(true);
+    } else if (activeTab === 'connections') {
+      await fetchConnections(true);
+    }
+  };
 
   // Export Results
   const exportCsv = () => {
@@ -563,7 +611,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
           {/* Engine Selector */}
           <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-lg border border-border/50">
             <button
-              onClick={() => setEngine('postgres')}
+              onClick={() => handleEngineSwitch('postgres')}
               className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 engine === 'postgres'
                   ? 'bg-primary text-primary-foreground shadow-sm'
@@ -574,7 +622,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
               <span>PostgreSQL</span>
             </button>
             <button
-              onClick={() => setEngine('mysql')}
+              onClick={() => handleEngineSwitch('mysql')}
               className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 engine === 'mysql'
                   ? 'bg-primary text-primary-foreground shadow-sm'
@@ -585,7 +633,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
               <span>MySQL / MariaDB</span>
             </button>
             <button
-              onClick={() => setEngine('redis')}
+              onClick={() => handleEngineSwitch('redis')}
               className={`flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md transition-all ${
                 engine === 'redis'
                   ? 'bg-primary text-primary-foreground shadow-sm'
@@ -598,26 +646,73 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
           </div>
 
           {/* Database Selector & Credentials Drawer Toggle */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-background border border-border/70 rounded-md px-2.5 py-1">
-              <Database className="w-3.5 h-3.5 text-muted-foreground" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-background border border-border/70 rounded-md px-2.5 py-1">
+              <Database className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground font-mono">DB:</span>
-              <select
-                value={selectedDb}
-                onChange={(e) => setSelectedDb(e.target.value)}
-                className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer max-w-[160px] truncate"
-              >
-                {availableDbs.map((db) => (
-                  <option key={db} value={db} className="bg-popover text-popover-foreground">
-                    {db}
-                  </option>
-                ))}
-              </select>
+              {editingCustomDb ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={customDbDraft}
+                    onChange={(e) => setCustomDbDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleApplyCustomDb();
+                      if (e.key === 'Escape') setEditingCustomDb(false);
+                    }}
+                    placeholder="database name..."
+                    autoFocus
+                    className="bg-muted/50 border border-border rounded px-1.5 py-0.5 text-xs font-mono w-32 focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyCustomDb}
+                    title="Use entered database name"
+                    className="text-emerald-500 hover:text-emerald-400 p-0.5 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingCustomDb(false)}
+                    title="Cancel"
+                    className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={selectedDb}
+                    onChange={(e) => setSelectedDb(e.target.value)}
+                    className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer max-w-[160px] truncate"
+                  >
+                    {availableDbs.map((db) => (
+                      <option key={db} value={db} className="bg-popover text-popover-foreground">
+                        {db}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomDbDraft(selectedDb);
+                      setEditingCustomDb(true);
+                    }}
+                    title="Type database name manually"
+                    className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                </>
+              )}
               <button
-                onClick={fetchDatabases}
+                type="button"
+                onClick={() => fetchDatabases(true)}
                 disabled={isLoadingDbs}
                 title="Refresh available databases"
-                className="text-muted-foreground hover:text-foreground p-0.5"
+                className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
               >
                 <RotateCw className={`w-3 h-3 ${isLoadingDbs ? 'animate-spin' : ''}`} />
               </button>
@@ -631,7 +726,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
               className="text-xs h-8 gap-1.5"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>{dbHost || dbUser ? 'Custom Auth' : 'Socket Auth'}</span>
+              <span>{dbHost || dbUser || dbPass ? 'Custom Auth' : 'Socket Auth'}</span>
             </Button>
 
             {/* Safe Mode Toggle */}
@@ -655,52 +750,124 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
 
         {/* Credentials Drawer (collapsible) */}
         {showCreds && (
-          <div className="bg-muted/30 border border-border/70 rounded-lg p-3 grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-center animate-in fade-in duration-200">
-            <div>
-              <label className="text-[10px] text-muted-foreground uppercase font-semibold">Host / Socket</label>
-              <Input
-                placeholder="localhost (default)"
-                value={dbHost}
-                onChange={(e) => setDbHost(e.target.value)}
-                className="h-7 text-xs font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-muted-foreground uppercase font-semibold">Port</label>
-              <Input
-                placeholder={engine === 'mysql' ? '3306' : engine === 'redis' ? '6379' : '5432'}
-                value={dbPort}
-                onChange={(e) => setDbPort(e.target.value)}
-                className="h-7 text-xs font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] text-muted-foreground uppercase font-semibold">Username</label>
-              <Input
-                placeholder={engine === 'mysql' ? 'root' : 'postgres'}
-                value={dbUser}
-                onChange={(e) => setDbUser(e.target.value)}
-                className="h-7 text-xs font-mono"
-              />
-            </div>
-            <div className="relative">
-              <label className="text-[10px] text-muted-foreground uppercase font-semibold">Password</label>
-              <div className="relative">
+          <div className="bg-muted/30 border border-border/70 rounded-lg p-3 space-y-2.5 animate-in fade-in duration-200">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-center">
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Host / Socket</label>
                 <Input
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Peer auth if blank"
-                  value={dbPass}
-                  onChange={(e) => setDbPass(e.target.value)}
-                  className="h-7 text-xs font-mono pr-8"
+                  placeholder="127.0.0.1 (if password set)"
+                  value={dbHost}
+                  onChange={(e) => setDbHost(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleApplyAuthAndReconnect(); }}
+                  className="h-7 text-xs font-mono"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2 top-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
               </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Port</label>
+                <Input
+                  placeholder={engine === 'mysql' ? '3306' : engine === 'redis' ? '6379' : '5432'}
+                  value={dbPort}
+                  onChange={(e) => setDbPort(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleApplyAuthAndReconnect(); }}
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Username</label>
+                <Input
+                  placeholder={engine === 'mysql' ? 'root' : 'postgres'}
+                  value={dbUser}
+                  onChange={(e) => setDbUser(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleApplyAuthAndReconnect(); }}
+                  className="h-7 text-xs font-mono"
+                />
+              </div>
+              <div className="relative">
+                <label className="text-[10px] text-muted-foreground uppercase font-semibold">Password</label>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Socket / Docker env if blank"
+                    value={dbPass}
+                    onChange={(e) => setDbPass(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleApplyAuthAndReconnect(); }}
+                    className="h-7 text-xs font-mono pr-8"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2 top-1.5 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-border/50 text-[11px] text-muted-foreground">
+              <span>Leave blank for automatic OS socket / sudo / Docker credential detection.</span>
+              <div className="flex items-center gap-2">
+                {(dbHost || dbPort || dbUser || dbPass) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setDbHost('');
+                      setDbPort('');
+                      setDbUser('');
+                      setDbPass('');
+                    }}
+                    className="h-6 text-[11px] px-2"
+                  >
+                    Reset to Socket Auth
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleApplyAuthAndReconnect}
+                  disabled={isLoadingDbs}
+                  className="h-6 text-[11px] px-3 gap-1"
+                >
+                  <RotateCw className={`w-3 h-3 ${isLoadingDbs ? 'animate-spin' : ''}`} />
+                  <span>Apply & Load DBs</span>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Database Discovery Diagnostic Banner */}
+        {dbError && (
+          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-lg px-3 py-2 text-xs flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-start gap-2 min-w-0 flex-1">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+              <div className="min-w-0">
+                <span className="font-semibold">Database discovery note: </span>
+                <span className="font-mono text-[11px] break-all text-amber-200/90">{dbError}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {!showCreds && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCreds(true)}
+                  className="h-6 text-[11px] px-2 border-amber-500/40 hover:bg-amber-500/20"
+                >
+                  Configure Auth
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fetchDatabases(true)}
+                className="h-6 text-[11px] px-2 border-amber-500/40 hover:bg-amber-500/20"
+              >
+                Retry
+              </Button>
             </div>
           </div>
         )}
@@ -1138,7 +1305,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={fetchConnections}
+                  onClick={() => fetchConnections(true)}
                   disabled={isLoadingConnections}
                   className="h-8 text-xs gap-1.5"
                 >
@@ -1147,6 +1314,24 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
                 </Button>
               </div>
             </div>
+
+            {connectionsError && (
+              <div className="bg-destructive/15 border border-destructive/40 text-destructive rounded-lg p-3 text-xs flex flex-wrap items-center justify-between gap-2 font-mono">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="whitespace-pre-wrap break-all">{connectionsError}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCreds(true)}
+                  className="h-6 text-[11px] px-2 font-sans shrink-0"
+                >
+                  Configure Auth
+                </Button>
+              </div>
+            )}
 
             {/* Connections Table */}
             <div className="flex-1 border border-border rounded-lg bg-card overflow-auto min-h-0">
@@ -1237,7 +1422,7 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={fetchSchemaTables}
+                  onClick={() => fetchSchemaTables(true)}
                   disabled={isLoadingSchema}
                   className="h-8 text-xs gap-1.5"
                 >
@@ -1246,6 +1431,24 @@ export const DatabaseManager: React.FC<DatabaseManagerProps> = ({ serverId, isOn
                 </Button>
               </div>
             </div>
+
+            {schemaError && (
+              <div className="bg-destructive/15 border border-destructive/40 text-destructive rounded-lg p-3 text-xs flex flex-wrap items-center justify-between gap-2 font-mono">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span className="whitespace-pre-wrap break-all">{schemaError}</span>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCreds(true)}
+                  className="h-6 text-[11px] px-2 font-sans shrink-0"
+                >
+                  Configure Auth
+                </Button>
+              </div>
+            )}
 
             {/* Keyspaces Banner for Redis */}
             {schemaSummary?.keyspaces && schemaSummary.keyspaces.length > 0 && (

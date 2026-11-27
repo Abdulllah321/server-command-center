@@ -3,7 +3,7 @@
  * Powered by Falah Tech (falah-tech.com)
  */
 
-export const APP_VERSION = '1.3.4';
+export const APP_VERSION = '1.3.5';
 export const GITHUB_REPO = 'Abdulllah321/server-command-center';
 
 export interface DocumentedRelease {
@@ -15,6 +15,20 @@ export interface DocumentedRelease {
 }
 
 export const DOCUMENTED_CHANGELOGS: Record<string, DocumentedRelease> = {
+  'v1.3.5': {
+    summary: 'Database Explorer & Query Execution Fix: Resolved remote shell quoting bugs that broke PostgreSQL/MySQL/Redis database discovery, query execution, schema inspection, and active connection monitoring, while adding clear error banners and direct Custom Auth/DB override controls.',
+    highlights: [
+      'Safe Base64 Script Dispatch: Replaced fragile nested `bash -c` single-quoting with base64-encoded stdin scripts and shared multi-tier runners (`__scc_run_pg_tsv`, `__scc_run_mysql_tsv`, `__scc_run_redis`), preserving `$\\t` delimiters and complex SQL/passwords.',
+      'Complete Multi-Tier Auth & Docker Fallbacks: Automatically tries socket `sudo`/`su` (`cd /tmp`), `debian.cnf`, `/etc/redis/redis.conf` `requirepass`, `127.0.0.1` TCP fallback, and Docker container env inspection across query execution, schema listing, connections, and DB discovery.',
+      'Inline Error Surface & Custom Auth Workflow: Replaced silent DB/schema/connection error swallowing with explicit diagnostics, one-click Configure Auth and Retry controls, an Apply & Load DBs action, and manual DB override editing.',
+      'Security & Validation Hardening: Enforced confirmation tokens and failure audit logs for mutating queries, redacted `DatabaseCredentials` `Debug` output with `Drop` zeroization, and normalized SQL keyword detection.'
+    ],
+    fixes: [
+      'Fixed PostgreSQL tab-delimiter collapse (`psql -F`) inside single-quoted `bash -c` that caused 0-table schemas and missing connection rows.',
+      'Fixed MySQL query token bug (`Query_Start_Token`), PostgreSQL `ORDER BY duration_seconds` missing alias error, `pg_namespace` schema table join, and Redis `$port_num` connection lookup typo.',
+      'Fixed `DatabaseManager` not re-fetching DBs on server/online transitions and keeping Redis `dump.rdb` selected during query execution.'
+    ]
+  },
   'v1.3.4': {
     summary: 'Backup Schedule & Run Crash Fix: Resolved the `Cannot read properties of undefined (reading \'toUpperCase\')` error when opening Backup Cron Schedules or fetching schedule status/run results, unified Rust-to-Frontend schedule contract serialization, added bash ERR status trapping, and improved Run Now diagnostics.',
     highlights: [

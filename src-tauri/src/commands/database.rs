@@ -1,22 +1,44 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::time::Instant;
+use base64::engine::general_purpose::STANDARD as b64;
+use base64::Engine as _;
 use russh::ChannelMsg;
 use russh::client::Handle;
 use serde::{Deserialize, Serialize};
 use tokio::time::{timeout, Duration};
+use zeroize::Zeroize;
 
 use crate::AppState;
 use crate::error::{CommandError, CommandResult};
 use crate::ssh::client::SshClientHandler;
 use crate::db::{log_activity, ActivityEntry, actions};
 use crate::commands::confirmation::consume_token;
+use crate::secrets::redact::redact_secrets;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct DatabaseCredentials {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub user: Option<String>,
     pub password: Option<String>,
+}
+
+impl fmt::Debug for DatabaseCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DatabaseCredentials")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("user", &self.user)
+            .field("password", &self.password.as_ref().map(|_| "[REDACTED]"))
+            .finish()
+    }
+}
+
+impl Drop for DatabaseCredentials {
+    fn drop(&mut self) {
+        self.password.zeroize();
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,10 +91,27 @@ pub struct DatabaseSchemaSummary {
     pub keyspaces: Option<Vec<String>>,
 }
 
-struct SshOutput {
-    stdout: String,
-    stderr: String,
-    exit_status: Option<u32>,
+pub(crate) struct SshOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_status: Option<u32>,
+}
+
+fn sanitize_error_text(raw: &str, password: &str) -> String {
+    let mut cleaned = redact_secrets(raw);
+    if !password.is_empty() {
+        cleaned = cleaned.replace(password, "***REDACTED***");
+    }
+    cleaned.trim().to_string()
+}
+
+fn combine_error_output(out: &SshOutput) -> String {
+    match (out.stdout.trim().is_empty(), out.stderr.trim().is_empty()) {
+        (false, false) => format!("{}\n{}", out.stdout.trim(), out.stderr.trim()),
+        (false, true) => out.stdout.trim().to_string(),
+        (true, false) => out.stderr.trim().to_string(),
+        (true, true) => String::new(),
+    }
 }
 
 async fn exec_ssh_command_full(
@@ -84,7 +123,7 @@ async fn exec_ssh_command_full(
         .map_err(|e| CommandError::Internal(format!("Failed to open SSH channel: {}", e)))?;
 
     channel.exec(true, cmd).await
-        .map_err(|e| CommandError::Internal(format!("Failed to exec command '{}': {}", cmd, e)))?;
+        .map_err(|e| CommandError::Internal(format!("Failed to execute remote database command: {}", e)))?;
 
     let mut stdout = String::new();
     let mut stderr = String::new();
@@ -96,7 +135,7 @@ async fn exec_ssh_command_full(
             Ok(opt) => opt,
             Err(_) => {
                 let _ = channel.close().await;
-                return Err(CommandError::Internal("Database query command timed out on remote server".into()));
+                return Err(CommandError::Internal("Database command timed out on remote server".into()));
             }
         };
 
@@ -125,17 +164,375 @@ async fn exec_ssh_command_full(
     Ok(SshOutput { stdout, stderr, exit_status: exit_code })
 }
 
-fn escape_bash_single_quote(s: &str) -> String {
-    s.replace('\'', "'\\''")
+/// Runs a full bash script safely by base64-encoding it over stdin so nested single quotes,
+/// `$'\t'`, dollar-quoted SQL, and special characters in passwords/queries never collide with shells.
+pub(crate) async fn exec_bash_script(
+    session: &mut Handle<SshClientHandler>,
+    script: &str,
+    timeout_duration: Duration,
+) -> Result<SshOutput, CommandError> {
+    let encoded = b64.encode(script.as_bytes());
+    let cmd = format!("printf '%s' '{}' | base64 -d | bash", encoded);
+    exec_ssh_command_full(session, &cmd, timeout_duration).await
+}
+
+/// Generates shared bash setup & multi-tier auth runner helpers (`__scc_run_pg`, `__scc_run_mysql`, `__scc_run_redis`).
+/// Each field is base64-decoded inside bash so arbitrary SQL, identifiers, and passwords pass cleanly.
+pub(crate) fn build_db_script(
+    creds: &DatabaseCredentials,
+    default_port: u16,
+    database: &str,
+    query: &str,
+    body: &str,
+) -> String {
+    let user_b64 = b64.encode(creds.user.as_deref().unwrap_or("").trim().as_bytes());
+    let pass_b64 = b64.encode(creds.password.as_deref().unwrap_or("").trim().as_bytes());
+    let host_b64 = b64.encode(creds.host.as_deref().unwrap_or("").trim().as_bytes());
+    let db_b64 = b64.encode(database.trim().as_bytes());
+    let query_b64 = b64.encode(query.as_bytes());
+    let port_num = creds.port.unwrap_or(default_port);
+
+    format!(
+        r#"export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+SCC_USER=$(printf '%s' '{user_b64}' | base64 -d)
+SCC_PASS=$(printf '%s' '{pass_b64}' | base64 -d)
+SCC_HOST=$(printf '%s' '{host_b64}' | base64 -d)
+SCC_PORT='{port_num}'
+SCC_DB=$(printf '%s' '{db_b64}' | base64 -d)
+SCC_QUERY=$(printf '%s' '{query_b64}' | base64 -d)
+
+__scc_run_pg_tsv() {{
+    local SQL="$1"
+    local LAST_ERR=""
+    local OUT=""
+
+    if [ -n "$SCC_PASS" ] || [ -n "$SCC_HOST" ]; then
+        export PGPASSWORD="$SCC_PASS"
+        local H_ARG="${{SCC_HOST:-127.0.0.1}}"
+        local U_ARG="${{SCC_USER:-postgres}}"
+        local TRY_DBS=("$SCC_DB")
+        if [ -z "$SCC_DB" ]; then
+            TRY_DBS=("postgres" "template1" "$U_ARG")
+        fi
+        if command -v psql >/dev/null 2>&1; then
+            for DB_CAND in "${{TRY_DBS[@]}}"; do
+                if OUT=$(psql -h "$H_ARG" -p "$SCC_PORT" -U "$U_ARG" ${{DB_CAND:+-d "$DB_CAND"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+                LAST_ERR="$OUT"
+                if [ -z "$SCC_HOST" ]; then
+                    if OUT=$(psql -p "$SCC_PORT" -U "$U_ARG" ${{DB_CAND:+-d "$DB_CAND"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                        printf '%s\n' "$OUT"
+                        return 0
+                    fi
+                fi
+            done
+        fi
+        if [ -z "$SCC_HOST" ] && command -v docker >/dev/null 2>&1; then
+            local DOCKER_PG
+            DOCKER_PG=$(docker ps --format '{{{{.Names}}}}\t{{{{.Image}}}}' 2>/dev/null | grep -iE 'postgres|timescale|supabase|pgvector|postgis' | cut -f1 | head -n 1)
+            if [ -n "$DOCKER_PG" ]; then
+                for DB_CAND in "${{TRY_DBS[@]}}"; do
+                    if OUT=$(docker exec -e PGPASSWORD="$SCC_PASS" "$DOCKER_PG" psql -U "$U_ARG" ${{DB_CAND:+-d "$DB_CAND"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                        printf '%s\n' "$OUT"
+                        return 0
+                    fi
+                    LAST_ERR="$OUT"
+                done
+            fi
+        fi
+        printf '%s\n' "$LAST_ERR" >&2
+        return 1
+    fi
+
+    if command -v psql >/dev/null 2>&1; then
+        if [ -n "$SCC_USER" ]; then
+            if [ "$(id -u)" -eq 0 ] && id -u "$SCC_USER" >/dev/null 2>&1; then
+                export SCC_DB SCC_PORT SCC_SQL_INNER="$SQL"
+                if command -v sudo >/dev/null 2>&1; then
+                    if OUT=$(cd /tmp && sudo -n -u "$SCC_USER" psql -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                        printf '%s\n' "$OUT"
+                        return 0
+                    fi
+                    LAST_ERR="$OUT"
+                fi
+                if OUT=$(cd /tmp && su -s /bin/bash "$SCC_USER" -c 'psql -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\''\t'\'' -v ON_ERROR_STOP=1 -c "$SCC_SQL_INNER"' 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+                LAST_ERR="$OUT"
+            fi
+            if OUT=$(psql -U "$SCC_USER" -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+        fi
+
+        if [ "$(id -u)" -eq 0 ] && id -u postgres >/dev/null 2>&1; then
+            export SCC_DB SCC_PORT SCC_SQL_INNER="$SQL"
+            if command -v sudo >/dev/null 2>&1; then
+                if OUT=$(cd /tmp && sudo -n -u postgres psql -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+                LAST_ERR="$OUT"
+                if [ "$SCC_PORT" = "5432" ]; then
+                    if OUT=$(cd /tmp && sudo -n -u postgres psql ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                        printf '%s\n' "$OUT"
+                        return 0
+                    fi
+                fi
+            fi
+            if OUT=$(cd /tmp && su -s /bin/bash postgres -c 'psql -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\''\t'\'' -v ON_ERROR_STOP=1 -c "$SCC_SQL_INNER"' 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+        fi
+
+        if OUT=$(psql -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+            printf '%s\n' "$OUT"
+            return 0
+        fi
+        [ -z "$LAST_ERR" ] && LAST_ERR="$OUT"
+
+        if OUT=$(psql -U "${{SCC_USER:-postgres}}" -p "$SCC_PORT" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+            printf '%s\n' "$OUT"
+            return 0
+        fi
+        if OUT=$(psql -h 127.0.0.1 -p "$SCC_PORT" -U "${{SCC_USER:-postgres}}" ${{SCC_DB:+-d "$SCC_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+            printf '%s\n' "$OUT"
+            return 0
+        fi
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        local DOCKER_PG
+        DOCKER_PG=$(docker ps --format '{{{{.Names}}}}\t{{{{.Image}}}}' 2>/dev/null | grep -iE 'postgres|timescale|supabase|pgvector|postgis' | cut -f1 | head -n 1)
+        if [ -n "$DOCKER_PG" ]; then
+            local DK_ENV
+            DK_ENV=$(docker inspect -f '{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}' "$DOCKER_PG" 2>/dev/null || true)
+            local DK_USER="${{SCC_USER:-$(printf '%s\n' "$DK_ENV" | sed -n 's/^POSTGRES_USER=//p' | head -n1)}}"
+            local DK_PASS
+            DK_PASS=$(printf '%s\n' "$DK_ENV" | sed -n 's/^POSTGRES_PASSWORD=//p' | head -n1)
+            local DK_DB="${{SCC_DB:-$(printf '%s\n' "$DK_ENV" | sed -n 's/^POSTGRES_DB=//p' | head -n1)}}"
+            [ -z "$DK_USER" ] && DK_USER="postgres"
+            if OUT=$(docker exec -e PGPASSWORD="$DK_PASS" "$DOCKER_PG" psql -U "$DK_USER" ${{DK_DB:+-d "$DK_DB"}} -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            if [ -z "$SCC_DB" ]; then
+                if OUT=$(docker exec -e PGPASSWORD="$DK_PASS" "$DOCKER_PG" psql -U "$DK_USER" -d template1 -X -A -F $'\t' -v ON_ERROR_STOP=1 -c "$SQL" 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+            fi
+            LAST_ERR="$OUT"
+        fi
+    fi
+
+    if [ -n "$LAST_ERR" ]; then
+        printf '%s\n' "$LAST_ERR" >&2
+    elif ! command -v psql >/dev/null 2>&1; then
+        printf '%s\n' "psql client is not installed and no running PostgreSQL Docker container was found." >&2
+    else
+        printf '%s\n' "Could not authenticate to PostgreSQL via socket or local auth. Provide credentials in Custom Auth." >&2
+    fi
+    return 1
+}}
+
+__scc_run_mysql_tsv() {{
+    local SQL="$1"
+    local MYSQL_BIN
+    MYSQL_BIN=$(command -v mysql || command -v mariadb || true)
+    local LAST_ERR=""
+    local OUT=""
+
+    if [ -n "$SCC_PASS" ] || [ -n "$SCC_HOST" ]; then
+        export MYSQL_PWD="$SCC_PASS"
+        local U_ARG="${{SCC_USER:-root}}"
+        if [ -n "$MYSQL_BIN" ]; then
+            if OUT=$("$MYSQL_BIN" -u "$U_ARG" ${{SCC_HOST:+-h "$SCC_HOST"}} -P "$SCC_PORT" ${{SCC_DB:+-D "$SCC_DB"}} --batch --raw -e "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+            if [ -z "$SCC_HOST" ]; then
+                if OUT=$("$MYSQL_BIN" -u "$U_ARG" -h 127.0.0.1 -P "$SCC_PORT" ${{SCC_DB:+-D "$SCC_DB"}} --batch --raw -e "$SQL" 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+            fi
+        fi
+        if [ -z "$SCC_HOST" ] && command -v docker >/dev/null 2>&1; then
+            local DOCKER_MY
+            DOCKER_MY=$(docker ps --format '{{{{.Names}}}}\t{{{{.Image}}}}' 2>/dev/null | grep -iE 'mysql|mariadb' | cut -f1 | head -n 1)
+            if [ -n "$DOCKER_MY" ]; then
+                if OUT=$(docker exec -e MYSQL_PWD="$SCC_PASS" "$DOCKER_MY" sh -c 'BIN=$(command -v mysql || command -v mariadb); "$BIN" -u "$1" ${{2:+-D "$2"}} --batch --raw -e "$3"' _ "$U_ARG" "$SCC_DB" "$SQL" 2>&1); then
+                    printf '%s\n' "$OUT"
+                    return 0
+                fi
+                LAST_ERR="$OUT"
+            fi
+        fi
+        printf '%s\n' "$LAST_ERR" >&2
+        return 1
+    fi
+
+    if [ -n "$MYSQL_BIN" ]; then
+        if [ -f /etc/mysql/debian.cnf ]; then
+            if OUT=$("$MYSQL_BIN" --defaults-file=/etc/mysql/debian.cnf ${{SCC_DB:+-D "$SCC_DB"}} --batch --raw -e "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+        fi
+        if OUT=$("$MYSQL_BIN" -u "${{SCC_USER:-root}}" -P "$SCC_PORT" ${{SCC_DB:+-D "$SCC_DB"}} --batch --raw -e "$SQL" 2>&1); then
+            printf '%s\n' "$OUT"
+            return 0
+        fi
+        [ -z "$LAST_ERR" ] && LAST_ERR="$OUT"
+
+        if [ "$(id -u)" -eq 0 ] && command -v sudo >/dev/null 2>&1; then
+            if OUT=$(sudo -n "$MYSQL_BIN" -P "$SCC_PORT" ${{SCC_DB:+-D "$SCC_DB"}} --batch --raw -e "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+        fi
+    fi
+
+    if command -v docker >/dev/null 2>&1; then
+        local DOCKER_MY
+        DOCKER_MY=$(docker ps --format '{{{{.Names}}}}\t{{{{.Image}}}}' 2>/dev/null | grep -iE 'mysql|mariadb' | cut -f1 | head -n 1)
+        if [ -n "$DOCKER_MY" ]; then
+            local DK_ENV
+            DK_ENV=$(docker inspect -f '{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}' "$DOCKER_MY" 2>/dev/null || true)
+            local DK_PASS
+            DK_PASS=$(printf '%s\n' "$DK_ENV" | sed -n -e 's/^MYSQL_ROOT_PASSWORD=//p' -e 's/^MARIADB_ROOT_PASSWORD=//p' | head -n1)
+            local DK_USER="root"
+            if [ -z "$DK_PASS" ]; then
+                DK_PASS=$(printf '%s\n' "$DK_ENV" | sed -n -e 's/^MYSQL_PASSWORD=//p' -e 's/^MARIADB_PASSWORD=//p' | head -n1)
+                local ALT_U
+                ALT_U=$(printf '%s\n' "$DK_ENV" | sed -n -e 's/^MYSQL_USER=//p' -e 's/^MARIADB_USER=//p' | head -n1)
+                [ -n "$ALT_U" ] && DK_USER="$ALT_U"
+            fi
+            [ -n "$SCC_USER" ] && DK_USER="$SCC_USER"
+            if OUT=$(docker exec -e MYSQL_PWD="$DK_PASS" "$DOCKER_MY" sh -c 'BIN=$(command -v mysql || command -v mariadb); "$BIN" -u "$1" ${{2:+-D "$2"}} --batch --raw -e "$3"' _ "$DK_USER" "$SCC_DB" "$SQL" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+        fi
+    fi
+
+    if [ -n "$LAST_ERR" ]; then
+        printf '%s\n' "$LAST_ERR" >&2
+    elif [ -z "$MYSQL_BIN" ]; then
+        printf '%s\n' "mysql / mariadb client is not installed and no running MySQL/MariaDB Docker container was found." >&2
+    else
+        printf '%s\n' "Could not connect to MySQL / MariaDB. Provide credentials in Custom Auth." >&2
+    fi
+    return 1
+}}
+
+__scc_run_redis() {{
+    local CMD_STR="$1"
+    local DB_NUM="0"
+    if [[ "$SCC_DB" =~ ^db([0-9]+)$ ]]; then
+        DB_NUM="${{BASH_REMATCH[1]}}"
+    fi
+    local H_ARG=""
+    [ -n "$SCC_HOST" ] && H_ARG="-h $SCC_HOST"
+    local LAST_ERR=""
+    local OUT=""
+
+    if [ -n "$SCC_PASS" ]; then
+        export REDISCLI_AUTH="$SCC_PASS"
+    elif [ -z "$SCC_HOST" ] && [ "$(id -u)" -eq 0 ]; then
+        local CONF_PASS=""
+        for CF in /etc/redis/redis.conf /etc/redis.conf /etc/valkey/valkey.conf /etc/redis/valkey.conf; do
+            if [ -r "$CF" ]; then
+                CONF_PASS=$(grep -E '^[[:space:]]*requirepass[[:space:]]+' "$CF" 2>/dev/null | head -n1 | awk '{{print $2}}' | tr -d '"' | tr -d "'")
+                [ -n "$CONF_PASS" ] && break
+            fi
+        done
+        [ -n "$CONF_PASS" ] && export REDISCLI_AUTH="$CONF_PASS"
+    fi
+
+    local REDIS_BIN
+    REDIS_BIN=$(command -v redis-cli || command -v valkey-cli || true)
+
+    local -a CMD_ARGS=()
+    if command -v xargs >/dev/null 2>&1; then
+        while IFS= read -r -d '' tok; do
+            CMD_ARGS+=("$tok")
+        done < <(printf '%s' "$CMD_STR" | xargs printf '%s\0' 2>/dev/null) || read -ra CMD_ARGS <<< "$CMD_STR"
+    else
+        read -ra CMD_ARGS <<< "$CMD_STR"
+    fi
+
+    if [ -n "$REDIS_BIN" ]; then
+        if OUT=$("$REDIS_BIN" $H_ARG -p "$SCC_PORT" -n "$DB_NUM" --no-auth-warning "${{CMD_ARGS[@]}}" 2>&1); then
+            if ! printf '%s' "$OUT" | grep -qiE '^(NOAUTH|Could not connect|Connection refused)'; then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+        fi
+        LAST_ERR="$OUT"
+    fi
+
+    if [ -z "$SCC_HOST" ] && command -v docker >/dev/null 2>&1; then
+        local DOCKER_RD
+        DOCKER_RD=$(docker ps --format '{{{{.Names}}}}\t{{{{.Image}}}}' 2>/dev/null | grep -iE 'redis|valkey|keydb' | cut -f1 | head -n 1)
+        if [ -n "$DOCKER_RD" ]; then
+            local DK_PASS="$SCC_PASS"
+            if [ -z "$DK_PASS" ]; then
+                DK_PASS=$(docker inspect -f '{{{{range .Config.Env}}}}{{{{println .}}}}{{{{end}}}}' "$DOCKER_RD" 2>/dev/null | sed -n 's/^REDIS_PASSWORD=//p' | head -n1)
+            fi
+            if OUT=$(docker exec -e REDISCLI_AUTH="$DK_PASS" "$DOCKER_RD" sh -c 'BIN=$(command -v redis-cli || command -v valkey-cli); DBN="$1"; shift; "$BIN" -n "$DBN" --no-auth-warning "$@"' _ "$DB_NUM" "${{CMD_ARGS[@]}}" 2>&1); then
+                printf '%s\n' "$OUT"
+                return 0
+            fi
+            LAST_ERR="$OUT"
+        fi
+    fi
+
+    if [ -n "$LAST_ERR" ]; then
+        printf '%s\n' "$LAST_ERR" >&2
+    elif [ -z "$REDIS_BIN" ]; then
+        printf '%s\n' "redis-cli is not installed and no running Redis Docker container was found." >&2
+    else
+        printf '%s\n' "Could not connect to Redis. Verify host, port, and password in Custom Auth." >&2
+    fi
+    return 1
+}}
+
+{body}
+"#
+    )
 }
 
 pub fn is_query_destructive(query: &str) -> bool {
-    let normalized = query.trim().to_uppercase();
+    let normalized = query.split_whitespace().collect::<Vec<_>>().join(" ").to_uppercase();
     let destructive_tokens = [
-        "DROP ", "TRUNCATE ", "DELETE ", "UPDATE ", "ALTER ", 
-        "GRANT ", "REVOKE ", "FLUSHALL", "FLUSHDB", "SHUTDOWN"
+        "DROP ", "TRUNCATE ", "DELETE ", "UPDATE ", "ALTER ",
+        "GRANT ", "REVOKE ", "FLUSHALL", "FLUSHDB", "SHUTDOWN",
     ];
-    destructive_tokens.iter().any(|&token| normalized.starts_with(token) || normalized.contains(&format!(" {}", token)))
+    destructive_tokens.iter().any(|&token| {
+        normalized.starts_with(token) || normalized.contains(&format!(" {}", token))
+    })
+}
+
+fn strip_noise_lines(text: &str) -> String {
+    text.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            !trimmed.starts_with("could not change directory to ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[tauri::command]
@@ -150,6 +547,9 @@ pub async fn execute_database_query(
     safe_mode: Option<bool>,
     confirmation_token: Option<String>,
 ) -> CommandResult<DatabaseQueryResult> {
+    if server_id.trim().is_empty() {
+        return Err(CommandError::Validation("Server ID cannot be empty".into()));
+    }
     if query.trim().is_empty() {
         return Err(CommandError::Validation("Query cannot be empty".into()));
     }
@@ -159,183 +559,118 @@ pub async fn execute_database_query(
 
     if is_safe && destructive {
         return Err(CommandError::Validation(
-            "Read-Only Safe Mode is active: mutation or destructive query (DROP/DELETE/UPDATE/ALTER/TRUNCATE/FLUSH) blocked. Disable Safe Mode or verify confirmation before running.".into()
+            "Read-Only Safe Mode is active: mutation or destructive query (DROP/DELETE/UPDATE/ALTER/TRUNCATE/FLUSH) blocked. Disable Safe Mode before running.".into(),
         ));
     }
 
     if destructive {
-        if let Some(token) = &confirmation_token {
-            consume_token(Some(token)).await?;
-        }
+        consume_token(confirmation_token.as_deref()).await?;
     }
+
+    let creds = credentials.unwrap_or_default();
+    let mut pass_for_redact = creds.password.clone().unwrap_or_default();
 
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let creds = credentials.unwrap_or_default();
-    let host = creds.host.as_deref().unwrap_or("").trim();
-    let user = creds.user.as_deref().unwrap_or("").trim();
-    let pass = creds.password.as_deref().unwrap_or("").trim();
-    let port = creds.port;
+    let default_port = match engine.as_str() {
+        "mysql" => 3306,
+        "redis" => 6379,
+        _ => 5432,
+    };
+    let target_db = if database.trim().is_empty() {
+        match engine.as_str() {
+            "mysql" => "mysql",
+            "redis" => "db0",
+            _ => "postgres",
+        }
+    } else {
+        database.trim()
+    };
 
-    let escaped_query = escape_bash_single_quote(&query);
+    let body = match engine.as_str() {
+        "mysql" => "__scc_run_mysql_tsv \"$SCC_QUERY\"",
+        "redis" => "__scc_run_redis \"$SCC_QUERY\"",
+        _ => "__scc_run_pg_tsv \"$SCC_QUERY\"",
+    };
+
+    let script = build_db_script(&creds, default_port, target_db, &query, body);
     let start_time = Instant::now();
+    let out_res = exec_bash_script(&mut session, &script, Duration::from_secs(60)).await;
+    drop(session);
 
-    let script = match engine.as_str() {
-        "mysql" => {
-            let port_num = port.unwrap_or(3306);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-DB="{database}"
-QUERY='\'System_SCC_Query_Start_Token\''
-QUERY='{escaped_query}'
+    let duration_ms = start_time.elapsed().as_millis() as u64;
 
-run_query() {{
-    if [ -n "$PASS" ]; then
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -D "$DB" --batch --raw -e "$QUERY" 2>&1 && return 0
-    fi
-
-    if [ -f /etc/mysql/debian.cnf ]; then
-        mysql --defaults-file=/etc/mysql/debian.cnf -D "$DB" --batch --raw -e "$QUERY" 2>&1 && return 0
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        if sudo mysql -D "$DB" --batch --raw -e "$QUERY" 2>&1; then
-            return 0
-        fi
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_MYSQL=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "mysql|mariadb" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_MYSQL" ]; then
-            docker exec "$DOCKER_MYSQL" mysql -u "${{USER:-root}}" -D "$DB" --batch --raw -e "$QUERY" 2>&1 && return 0
-        fi
-    fi
-
-    mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -D "$DB" --batch --raw -e "$QUERY" 2>&1
-}}
-
-run_query
-'
-"#
-            )
-        },
-        "redis" => {
-            let port_num = port.unwrap_or(6379);
-            format!(
-                r#"bash -c '
-HOST="{host}"
-PORT="{port_num}"
-PASS="{pass}"
-DB="{database}"
-CMD='{escaped_query}'
-
-DB_NUM="0"
-if [[ "$DB" =~ ^db([0-9]+)$ ]]; then
-    DB_NUM="${{BASH_REMATCH[1]}}"
-fi
-
-H_ARG=""
-[ -n "$HOST" ] && H_ARG="-h $HOST"
-A_ARG=""
-[ -n "$PASS" ] && A_ARG="-a $PASS"
-
-run_redis() {{
-    if command -v redis-cli >/dev/null 2>&1; then
-        redis-cli $H_ARG -p "$PORT" $A_ARG -n "$DB_NUM" $CMD 2>&1 && return 0
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_REDIS=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "redis" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_REDIS" ]; then
-            docker exec "$DOCKER_REDIS" redis-cli $H_ARG -p "$PORT" $A_ARG -n "$DB_NUM" $CMD 2>&1 && return 0
-        fi
-    fi
-
-    redis-cli $H_ARG -p "$PORT" $A_ARG -n "$DB_NUM" $CMD 2>&1
-}}
-
-run_redis
-'
-"#
-            )
-        },
-        _ => {
-            // PostgreSQL default
-            let port_num = port.unwrap_or(5432);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-DB="{database}"
-QUERY='{escaped_query}'
-
-run_pg() {{
-    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
-        export PGPASSWORD="$PASS"
-        H_ARG=""
-        [ -n "$HOST" ] && H_ARG="-h $HOST"
-        U_ARG=""
-        [ -n "$USER" ] && U_ARG="-U $USER"
-        psql $H_ARG -p "$PORT" $U_ARG -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>&1
-        return $?
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        if id -u postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>&1
-            return $?
-        elif su - postgres -c "psql -d '$DB' -X -A -F \$'\t' -c \"\$QUERY\"" 2>&1; then
-            return $?
-        fi
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_PG=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "postgres|timescale" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_PG" ]; then
-            U_NAME="${{USER:-postgres}}"
-            docker exec "$DOCKER_PG" psql -U "$U_NAME" -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>&1
-            return $?
-        fi
-    fi
-
-    psql -U "${{USER:-postgres}}" -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>&1
-}}
-
-run_pg
-'
-"#
-            )
+    let out = match out_res {
+        Ok(o) => o,
+        Err(e) => {
+            let safe_err = sanitize_error_text(&e.to_string(), &pass_for_redact);
+            if destructive {
+                if let Ok(conn) = state.db.lock() {
+                    log_activity(&conn, ActivityEntry {
+                        server_id: Some(server_id.clone()),
+                        action: actions::DATABASE_QUERY.into(),
+                        target: Some(format!("{}/{}", engine, target_db)),
+                        status: "failed".into(),
+                        detail: Some(safe_err.clone()),
+                        duration_ms: Some(duration_ms as i64),
+                    });
+                }
+            }
+            pass_for_redact.zeroize();
+            return Err(CommandError::Internal(safe_err));
         }
     };
 
-    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(60)).await?;
-    let duration_ms = start_time.elapsed().as_millis() as u64;
+    let raw_combined = strip_noise_lines(&combine_error_output(&out));
+    let sanitized_output = sanitize_error_text(&raw_combined, &pass_for_redact);
 
-    let combined_output = if !out.stdout.is_empty() {
-        out.stdout.clone()
-    } else {
-        out.stderr.clone()
-    };
+    let lower_out = sanitized_output.to_lowercase();
+    let is_redis_err = engine == "redis" && (
+        sanitized_output.trim_start().starts_with("(error)")
+            || sanitized_output.trim_start().starts_with("ERR ")
+            || sanitized_output.trim_start().starts_with("NOAUTH ")
+            || sanitized_output.trim_start().starts_with("WRONGTYPE ")
+    );
+    let is_cli_or_sql_err = out.exit_status != Some(0)
+        || is_redis_err
+        || (!sanitized_output.contains('\t') && (
+            lower_out.starts_with("error:")
+                || lower_out.starts_with("fatal:")
+                || lower_out.contains("psql: error:")
+                || lower_out.contains("error 10")
+                || lower_out.contains("error 20")
+                || lower_out.contains("access denied for user")
+                || lower_out.contains("syntax error at or near")
+                || (lower_out.contains("table '") && lower_out.contains("doesn't exist"))
+        ));
 
-    // Check for explicit SQL error message indicators
-    let has_error = out.exit_status != Some(0) || 
-        combined_output.contains("ERROR:") || 
-        combined_output.contains("FATAL:") || 
-        combined_output.contains("ERROR ") || 
-        combined_output.contains("syntax error at or near") ||
-        combined_output.contains("Table '") && combined_output.contains("doesn't exist");
-
-    if has_error && !combined_output.contains("rows)") && !combined_output.contains("\t") {
-        return Err(CommandError::Internal(format!("Database query failed: {}", combined_output.trim())));
+    if is_cli_or_sql_err {
+        if destructive {
+            if let Ok(conn) = state.db.lock() {
+                log_activity(&conn, ActivityEntry {
+                    server_id: Some(server_id.clone()),
+                    action: actions::DATABASE_QUERY.into(),
+                    target: Some(format!("{}/{}", engine, target_db)),
+                    status: "failed".into(),
+                    detail: Some(format!(
+                        "Failed query on {}: {}",
+                        target_db,
+                        sanitized_output.chars().take(180).collect::<String>()
+                    )),
+                    duration_ms: Some(duration_ms as i64),
+                });
+            }
+        }
+        pass_for_redact.zeroize();
+        let msg = if sanitized_output.is_empty() {
+            "Remote database command failed with non-zero exit status".to_string()
+        } else {
+            sanitized_output
+        };
+        return Err(CommandError::Internal(format!("Database query failed: {}", msg)));
     }
 
     let mut columns: Vec<String> = Vec::new();
@@ -343,7 +678,7 @@ run_pg
     let mut affected_rows: Option<u64> = None;
     let mut is_truncated = false;
 
-    let lines: Vec<&str> = combined_output.lines().collect();
+    let lines: Vec<&str> = sanitized_output.lines().collect();
 
     if engine == "redis" {
         columns = vec!["Result".to_string()];
@@ -352,12 +687,15 @@ run_pg
             map.insert("Result".to_string(), serde_json::Value::String(line.to_string()));
             rows.push(map);
         }
+        if lines.len() > 500 {
+            is_truncated = true;
+        }
     } else if !lines.is_empty() {
-        // Tabular parsing (PostgreSQL and MySQL tab-separated)
         let first_line = lines[0].trim_end();
+        let command_tags = ["UPDATE ", "DELETE ", "INSERT ", "CREATE ", "ALTER ", "DROP ", "TRUNCATE ", "GRANT ", "REVOKE "];
+        let is_tag = lines.len() <= 2 && !first_line.contains('\t') && command_tags.iter().any(|t| first_line.starts_with(t));
 
-        // Check if output is a mutation tag like "UPDATE 5" or "DELETE 3"
-        if lines.len() <= 2 && (first_line.starts_with("UPDATE ") || first_line.starts_with("DELETE ") || first_line.starts_with("INSERT ")) {
+        if is_tag {
             let parts: Vec<&str> = first_line.split_whitespace().collect();
             if let Some(num_str) = parts.last() {
                 if let Ok(n) = num_str.parse::<u64>() {
@@ -369,16 +707,13 @@ run_pg
             map.insert("Command Result".to_string(), serde_json::Value::String(first_line.to_string()));
             rows.push(map);
         } else {
-            // First row represents column headers
             columns = first_line.split('\t').map(|s| s.trim().to_string()).collect();
 
             for line in lines.iter().skip(1) {
                 let trimmed = line.trim_end();
-                // Skip PG row count summary (e.g. "(5 rows)")
-                if trimmed.starts_with('(') && trimmed.ends_with("rows)") || (trimmed.starts_with('(') && trimmed.ends_with("row)")) {
-                    continue;
-                }
-                if trimmed.is_empty() {
+                if (trimmed.starts_with('(') && (trimmed.ends_with("rows)") || trimmed.ends_with("row)")))
+                    || trimmed.is_empty()
+                {
                     continue;
                 }
 
@@ -413,19 +748,21 @@ run_pg
 
     let row_count = rows.len();
 
-    // Log destructive or write queries into activity log
     if destructive {
         if let Ok(conn) = state.db.lock() {
+            let safe_preview = redact_secrets(query.trim()).chars().take(80).collect::<String>();
             log_activity(&conn, ActivityEntry {
                 server_id: Some(server_id.clone()),
                 action: actions::DATABASE_QUERY.into(),
-                target: Some(format!("{}/{}", engine, database)),
+                target: Some(format!("{}/{}", engine, target_db)),
                 status: "success".into(),
-                detail: Some(format!("Executed query on {}: {} (rows: {}, time: {}ms)", database, query.chars().take(80).collect::<String>(), row_count, duration_ms)),
+                detail: Some(format!("Executed query on {}: {} (rows: {}, time: {}ms)", target_db, safe_preview, row_count, duration_ms)),
                 duration_ms: Some(duration_ms as i64),
             });
         }
     }
+
+    pass_for_redact.zeroize();
 
     Ok(DatabaseQueryResult {
         columns,
@@ -433,7 +770,7 @@ run_pg
         row_count,
         execution_time_ms: duration_ms,
         affected_rows,
-        raw_output: combined_output,
+        raw_output: sanitized_output,
         is_truncated,
     })
 }
@@ -447,142 +784,90 @@ pub async fn get_database_connections(
     database: Option<String>,
     credentials: Option<DatabaseCredentials>,
 ) -> CommandResult<DatabaseConnectionStats> {
+    if server_id.trim().is_empty() {
+        return Err(CommandError::Validation("Server ID cannot be empty".into()));
+    }
+
+    let creds = credentials.unwrap_or_default();
+    let mut pass_for_redact = creds.password.clone().unwrap_or_default();
+
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let creds = credentials.unwrap_or_default();
-    let host = creds.host.as_deref().unwrap_or("").trim();
-    let user = creds.user.as_deref().unwrap_or("").trim();
-    let pass = creds.password.as_deref().unwrap_or("").trim();
-    let port = creds.port;
-    let target_db = database.unwrap_or_else(|| match engine.as_str() {
-        "mysql" => "mysql".to_string(),
-        "redis" => "db0".to_string(),
-        _ => "postgres".to_string(),
-    });
+    let target_db = database
+        .filter(|d| !d.trim().is_empty())
+        .unwrap_or_else(|| match engine.as_str() {
+            "mysql" => "mysql".to_string(),
+            "redis" => "db0".to_string(),
+            _ => "postgres".to_string(),
+        });
 
-    let script = match engine.as_str() {
-        "mysql" => {
-            let port_num = port.unwrap_or(3306);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
+    let (default_port, body) = match engine.as_str() {
+        "mysql" => (
+            3306,
+            r#"
+CONNS_Q="SELECT ID, IFNULL(DB, ''), IFNULL(USER, ''), IFNULL(HOST, ''), IFNULL(COMMAND, ''), IFNULL(REPLACE(REPLACE(REPLACE(INFO, '\r', ' '), '\n', ' '), '\t', ' '), ''), IFNULL(TIME, 0), IFNULL(STATE, '') FROM information_schema.processlist ORDER BY TIME DESC LIMIT 100;"
+LIMIT_Q="SHOW VARIABLES LIKE 'max_connections';"
+__scc_run_mysql_tsv "$CONNS_Q"
+RC=$?
+[ $RC -ne 0 ] && exit $RC
+echo "===LIMIT==="
+__scc_run_mysql_tsv "$LIMIT_Q" || true
+"#,
+        ),
+        "redis" => (
+            6379,
+            r#"
+__scc_run_redis "CLIENT LIST"
+RC=$?
+[ $RC -ne 0 ] && exit $RC
+echo "===LIMIT==="
+__scc_run_redis "CONFIG GET maxclients" || true
+"#,
+        ),
+        _ => (
+            5432,
+            r#"
+CONNS_Q="SELECT pid::text, COALESCE(datname, ''), COALESCE(usename, ''), COALESCE(client_addr::text, 'local'), COALESCE(state, 'unknown'), REGEXP_REPLACE(COALESCE(query, ''), E'[\\r\\n\\t]+', ' ', 'g'), ROUND(COALESCE(EXTRACT(EPOCH FROM (now() - query_start)), 0)::numeric, 1) AS duration_seconds, COALESCE(NULLIF(COALESCE(wait_event_type, '') || ': ' || COALESCE(wait_event, ''), ': '), '') FROM pg_stat_activity WHERE pid <> pg_backend_pid() ORDER BY duration_seconds DESC LIMIT 100;"
+LIMIT_Q="SELECT current_setting('max_connections');"
+__scc_run_pg_tsv "$CONNS_Q"
+RC=$?
+[ $RC -ne 0 ] && exit $RC
+echo "===LIMIT==="
+__scc_run_pg_tsv "$LIMIT_Q" || true
+"#,
+        ),
+    };
 
-QUERY="SELECT ID, IFNULL(DB, '\'''\''), IFNULL(USER, '\'''\''), IFNULL(HOST, '\'''\''), IFNULL(COMMAND, '\'''\''), IFNULL(REPLACE(REPLACE(INFO, '\n', ' '), '\t', ' '), '\'''\''), IFNULL(TIME, 0), IFNULL(STATE, '\'''\'') FROM information_schema.processlist ORDER BY TIME DESC LIMIT 100;"
-LIMIT_QUERY="SHOW VARIABLES LIKE '\''max_connections\'';"
+    let script = build_db_script(&creds, default_port, &target_db, "", body);
+    let out_res = exec_bash_script(&mut session, &script, Duration::from_secs(15)).await;
+    drop(session);
 
-run_mysql() {{
-    if [ -n "$PASS" ]; then
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" --batch --raw -e "$QUERY" 2>/dev/null
-        echo "===LIMIT==="
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" --batch --raw -e "$LIMIT_QUERY" 2>/dev/null
-        return 0
-    fi
-
-    if [ -f /etc/mysql/debian.cnf ]; then
-        mysql --defaults-file=/etc/mysql/debian.cnf --batch --raw -e "$QUERY" 2>/dev/null
-        echo "===LIMIT==="
-        mysql --defaults-file=/etc/mysql/debian.cnf --batch --raw -e "$LIMIT_QUERY" 2>/dev/null
-        return 0
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        sudo mysql --batch --raw -e "$QUERY" 2>/dev/null
-        echo "===LIMIT==="
-        sudo mysql --batch --raw -e "$LIMIT_QUERY" 2>/dev/null
-        return 0
-    fi
-
-    mysql -u "${{USER:-root}}" --batch --raw -e "$QUERY" 2>/dev/null
-    echo "===LIMIT==="
-    mysql -u "${{USER:-root}}" --batch --raw -e "$LIMIT_QUERY" 2>/dev/null
-}}
-
-run_mysql
-'
-"#
-            )
-        },
-        "redis" => {
-            let port_num = port.unwrap_or(6379);
-            format!(
-                r#"bash -c '
-HOST="{host}"
-PORT="{port_num}"
-PASS="{pass}"
-
-H_ARG=""
-[ -n "$HOST" ] && H_ARG="-h $HOST"
-A_ARG=""
-[ -n "$PASS" ] && A_ARG="-a $PASS"
-
-run_redis() {{
-    redis-cli $H_ARG -p "$port_num" $A_ARG CLIENT LIST 2>/dev/null
-    echo "===LIMIT==="
-    redis-cli $H_ARG -p "$port_num" $A_ARG CONFIG GET maxclients 2>/dev/null
-}}
-
-run_redis
-'
-"#
-            )
-        },
-        _ => {
-            // PostgreSQL default
-            let port_num = port.unwrap_or(5432);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-DB="{target_db}"
-
-QUERY="SELECT pid::text, COALESCE(datname, '\'''\''), COALESCE(usename, '\'''\''), COALESCE(client_addr::text, '\''local'\''), COALESCE(state, '\''unknown'\''), COALESCE(REPLACE(REPLACE(query, E'\''\n'\'', '\'' '\''), E'\''\t'\'', '\'' '\''), '\'''\''), ROUND(COALESCE(EXTRACT(EPOCH FROM (now() - query_start)), 0)::numeric, 1), COALESCE(wait_event_type || '\'': '\'' || wait_event, '\'''\'') FROM pg_stat_activity WHERE pid <> pg_backend_pid() ORDER BY duration_seconds DESC LIMIT 100;"
-LIMIT_QUERY="SHOW max_connections;"
-
-run_pg() {{
-    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
-        export PGPASSWORD="$PASS"
-        H_ARG=""
-        [ -n "$HOST" ] && H_ARG="-h $HOST"
-        U_ARG=""
-        [ -n "$USER" ] && U_ARG="-U $USER"
-        psql $H_ARG -p "$PORT" $U_ARG -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null
-        echo "===LIMIT==="
-        psql $H_ARG -p "$PORT" $U_ARG -d "$DB" -X -A -F $'\t' -t -c "$LIMIT_QUERY" 2>/dev/null
-        return 0
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        if id -u postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null
-            echo "===LIMIT==="
-            sudo -u postgres psql -d "$DB" -X -A -F $'\t' -t -c "$LIMIT_QUERY" 2>/dev/null
-            return 0
-        fi
-    fi
-
-    psql -U "${{USER:-postgres}}" -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null
-    echo "===LIMIT==="
-    psql -U "${{USER:-postgres}}" -d "$DB" -X -A -F $'\t' -t -c "$LIMIT_QUERY" 2>/dev/null
-}}
-
-run_pg
-'
-"#
-            )
+    let out = match out_res {
+        Ok(o) => o,
+        Err(e) => {
+            let safe_err = sanitize_error_text(&e.to_string(), &pass_for_redact);
+            pass_for_redact.zeroize();
+            return Err(CommandError::Internal(safe_err));
         }
     };
 
-    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(15)).await?;
-    let parts: Vec<&str> = out.stdout.split("===LIMIT===").collect();
+    if out.exit_status != Some(0) {
+        let err_msg = sanitize_error_text(&strip_noise_lines(&combine_error_output(&out)), &pass_for_redact);
+        pass_for_redact.zeroize();
+        return Err(CommandError::Internal(if err_msg.is_empty() {
+            format!("Failed to fetch {} connections", engine)
+        } else {
+            err_msg
+        }));
+    }
 
+    pass_for_redact.zeroize();
+
+    let clean_stdout = strip_noise_lines(&out.stdout);
+    let parts: Vec<&str> = clean_stdout.split("===LIMIT===").collect();
     let conn_section = parts.first().copied().unwrap_or("");
     let limit_section = parts.get(1).copied().unwrap_or("");
 
@@ -632,20 +917,16 @@ run_pg
             }
         }
 
-        // Parse redis maxclients
         for line in limit_section.lines() {
-            let trimmed = line.trim();
-            if let Ok(limit) = trimmed.parse::<usize>() {
+            if let Ok(limit) = line.trim().parse::<usize>() {
                 max_connections_limit = Some(limit);
                 break;
             }
         }
     } else {
-        // Tab-separated connection lines for PG & MySQL
-        let lines: Vec<&str> = conn_section.lines().collect();
-        for line in lines.iter().skip(1) {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('(') {
+        for line in conn_section.lines().skip(1) {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() || (trimmed.starts_with('(') && (trimmed.ends_with("rows)") || trimmed.ends_with("row)"))) {
                 continue;
             }
             let cols: Vec<&str> = trimmed.split('\t').collect();
@@ -674,7 +955,9 @@ run_pg
 
         for line in limit_section.lines() {
             let trimmed = line.trim();
-            // In MySQL, "max_connections 151" or in PG "100"
+            if trimmed == "current_setting" || trimmed == "Variable_name\tValue" {
+                continue;
+            }
             for token in trimmed.split_whitespace() {
                 if let Ok(limit) = token.parse::<usize>() {
                     max_connections_limit = Some(limit);
@@ -713,121 +996,105 @@ pub async fn terminate_database_connection(
     credentials: Option<DatabaseCredentials>,
     confirmation_token: Option<String>,
 ) -> CommandResult<String> {
-    if let Some(token) = &confirmation_token {
-        consume_token(Some(token)).await?;
+    if server_id.trim().is_empty() {
+        return Err(CommandError::Validation("Server ID cannot be empty".into()));
     }
+    if connection_id.trim().is_empty() {
+        return Err(CommandError::Validation("Connection ID cannot be empty".into()));
+    }
+
+    // Validate numeric/safe connection identifier to prevent SQL/command injection
+    let conn_id_trimmed = connection_id.trim();
+    if !conn_id_trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Err(CommandError::Validation("Connection ID must be a numeric PID / client ID".into()));
+    }
+
+    consume_token(confirmation_token.as_deref()).await?;
+
+    let creds = credentials.unwrap_or_default();
+    let mut pass_for_redact = creds.password.clone().unwrap_or_default();
 
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let creds = credentials.unwrap_or_default();
-    let host = creds.host.as_deref().unwrap_or("").trim();
-    let user = creds.user.as_deref().unwrap_or("").trim();
-    let pass = creds.password.as_deref().unwrap_or("").trim();
-    let port = creds.port;
-
-    let escaped_id = escape_bash_single_quote(&connection_id);
-
-    let script = match engine.as_str() {
-        "mysql" => {
-            let port_num = port.unwrap_or(3306);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-ID="{escaped_id}"
-
-run_kill() {{
-    if [ -n "$PASS" ]; then
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -e "KILL $ID;" 2>&1 && return 0
-    fi
-    if [ -f /etc/mysql/debian.cnf ]; then
-        mysql --defaults-file=/etc/mysql/debian.cnf -e "KILL $ID;" 2>&1 && return 0
-    fi
-    if [ "$(id -u)" -eq 0 ]; then
-        sudo mysql -e "KILL $ID;" 2>&1 && return 0
-    fi
-    mysql -u "${{USER:-root}}" -e "KILL $ID;" 2>&1
-}}
-run_kill
-'
-"#
-            )
-        },
-        "redis" => {
-            let port_num = port.unwrap_or(6379);
-            format!(
-                r#"bash -c '
-HOST="{host}"
-PORT="{port_num}"
-PASS="{pass}"
-ID="{escaped_id}"
-
-H_ARG=""
-[ -n "$HOST" ] && H_ARG="-h $HOST"
-A_ARG=""
-[ -n "$PASS" ] && A_ARG="-a $PASS"
-
-redis-cli $H_ARG -p "$PORT" $A_ARG CLIENT KILL ID "$ID" 2>&1
-'
-"#
-            )
-        },
-        _ => {
-            // PostgreSQL default
-            let port_num = port.unwrap_or(5432);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-PID="{escaped_id}"
-
-run_kill() {{
-    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
-        export PGPASSWORD="$PASS"
-        H_ARG=""
-        [ -n "$HOST" ] && H_ARG="-h $HOST"
-        U_ARG=""
-        [ -n "$USER" ] && U_ARG="-U $USER"
-        psql $H_ARG -p "$PORT" $U_ARG -d postgres -t -A -c "SELECT pg_terminate_backend($PID);" 2>&1
-        return $?
-    fi
-    if [ "$(id -u)" -eq 0 ]; then
-        if id -u postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -d postgres -t -A -c "SELECT pg_terminate_backend($PID);" 2>&1
-            return $?
-        fi
-    fi
-    psql -U "${{USER:-postgres}}" -d postgres -t -A -c "SELECT pg_terminate_backend($PID);" 2>&1
-}}
-run_kill
-'
-"#
-            )
-        }
+    let started = Instant::now();
+    let (default_port, target_db, body) = match engine.as_str() {
+        "mysql" => (
+            3306,
+            "mysql",
+            r#"__scc_run_mysql_tsv "KILL $SCC_QUERY;""#,
+        ),
+        "redis" => (
+            6379,
+            "db0",
+            r#"__scc_run_redis "CLIENT KILL ID $SCC_QUERY""#,
+        ),
+        _ => (
+            5432,
+            "postgres",
+            r#"__scc_run_pg_tsv "SELECT pg_terminate_backend($SCC_QUERY);""#,
+        ),
     };
 
-    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(10)).await?;
-    let output = if !out.stdout.is_empty() { out.stdout.trim().to_string() } else { out.stderr.trim().to_string() };
+    let script = build_db_script(&creds, default_port, target_db, conn_id_trimmed, body);
+    let out_res = exec_bash_script(&mut session, &script, Duration::from_secs(10)).await;
+    drop(session);
 
-    if let Ok(conn) = state.db.lock() {
-        log_activity(&conn, ActivityEntry {
-            server_id: Some(server_id.clone()),
-            action: actions::TERMINATE_DATABASE_CONNECTION.into(),
-            target: Some(format!("{}/{}", engine, connection_id)),
-            status: "success".into(),
-            detail: Some(format!("Terminated database connection: {} ({})", connection_id, output)),
-            duration_ms: None,
-        });
+    let duration_ms = started.elapsed().as_millis() as i64;
+
+    match out_res {
+        Ok(out) if out.exit_status == Some(0) => {
+            let output = sanitize_error_text(&strip_noise_lines(&combine_error_output(&out)), &pass_for_redact);
+            pass_for_redact.zeroize();
+            if let Ok(conn) = state.db.lock() {
+                log_activity(&conn, ActivityEntry {
+                    server_id: Some(server_id.clone()),
+                    action: actions::TERMINATE_DATABASE_CONNECTION.into(),
+                    target: Some(format!("{}/{}", engine, conn_id_trimmed)),
+                    status: "success".into(),
+                    detail: Some(format!("Terminated database connection {}: {}", conn_id_trimmed, output)),
+                    duration_ms: Some(duration_ms),
+                });
+            }
+            Ok(format!("Connection {} terminated successfully", conn_id_trimmed))
+        }
+        Ok(out) => {
+            let err_msg = sanitize_error_text(&strip_noise_lines(&combine_error_output(&out)), &pass_for_redact);
+            pass_for_redact.zeroize();
+            if let Ok(conn) = state.db.lock() {
+                log_activity(&conn, ActivityEntry {
+                    server_id: Some(server_id.clone()),
+                    action: actions::TERMINATE_DATABASE_CONNECTION.into(),
+                    target: Some(format!("{}/{}", engine, conn_id_trimmed)),
+                    status: "failed".into(),
+                    detail: Some(err_msg.clone()),
+                    duration_ms: Some(duration_ms),
+                });
+            }
+            Err(CommandError::Internal(if err_msg.is_empty() {
+                format!("Failed to terminate connection {}", conn_id_trimmed)
+            } else {
+                err_msg
+            }))
+        }
+        Err(e) => {
+            let err_msg = sanitize_error_text(&e.to_string(), &pass_for_redact);
+            pass_for_redact.zeroize();
+            if let Ok(conn) = state.db.lock() {
+                log_activity(&conn, ActivityEntry {
+                    server_id: Some(server_id.clone()),
+                    action: actions::TERMINATE_DATABASE_CONNECTION.into(),
+                    target: Some(format!("{}/{}", engine, conn_id_trimmed)),
+                    status: "failed".into(),
+                    detail: Some(err_msg.clone()),
+                    duration_ms: Some(duration_ms),
+                });
+            }
+            Err(CommandError::Internal(err_msg))
+        }
     }
-
-    Ok(format!("Connection {} terminated successfully", connection_id))
 }
 
 #[tauri::command]
@@ -839,110 +1106,87 @@ pub async fn get_database_schema_tables(
     database: String,
     credentials: Option<DatabaseCredentials>,
 ) -> CommandResult<DatabaseSchemaSummary> {
+    if server_id.trim().is_empty() {
+        return Err(CommandError::Validation("Server ID cannot be empty".into()));
+    }
+
+    let creds = credentials.unwrap_or_default();
+    let mut pass_for_redact = creds.password.clone().unwrap_or_default();
+
     let session_arc = state.session_manager
         .get_or_connect(server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let creds = credentials.unwrap_or_default();
-    let host = creds.host.as_deref().unwrap_or("").trim();
-    let user = creds.user.as_deref().unwrap_or("").trim();
-    let pass = creds.password.as_deref().unwrap_or("").trim();
-    let port = creds.port;
+    let target_db = if database.trim().is_empty() {
+        match engine.as_str() {
+            "mysql" => "mysql".to_string(),
+            "redis" => "db0".to_string(),
+            _ => "postgres".to_string(),
+        }
+    } else {
+        database.trim().to_string()
+    };
 
-    let script = match engine.as_str() {
-        "mysql" => {
-            let port_num = port.unwrap_or(3306);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-DB="{database}"
-
-QUERY="SELECT TABLE_NAME, TABLE_SCHEMA, IFNULL(TABLE_ROWS, 0), CONCAT(ROUND((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 2), '\'' MB'\''), TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA = '\''$DB'\'' OR TABLE_SCHEMA = DATABASE() ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC LIMIT 200;"
-
-run_mysql() {{
-    if [ -n "$PASS" ]; then
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -D "$DB" --batch --raw -e "$QUERY" 2>/dev/null && return 0
-    fi
-    if [ -f /etc/mysql/debian.cnf ]; then
-        mysql --defaults-file=/etc/mysql/debian.cnf -D "$DB" --batch --raw -e "$QUERY" 2>/dev/null && return 0
-    fi
-    if [ "$(id -u)" -eq 0 ]; then
-        sudo mysql -D "$DB" --batch --raw -e "$QUERY" 2>/dev/null && return 0
-    fi
-    mysql -u "${{USER:-root}}" -D "$DB" --batch --raw -e "$QUERY" 2>/dev/null
-}}
-run_mysql
-'
-"#
-            )
-        },
-        "redis" => {
-            let port_num = port.unwrap_or(6379);
-            format!(
-                r#"bash -c '
-HOST="{host}"
-PORT="{port_num}"
-PASS="{pass}"
-
-H_ARG=""
-[ -n "$HOST" ] && H_ARG="-h $HOST"
-A_ARG=""
-[ -n "$PASS" ] && A_ARG="-a $PASS"
-
-redis-cli $H_ARG -p "$PORT" $A_ARG INFO keyspace 2>/dev/null
+    let (default_port, body) = match engine.as_str() {
+        "mysql" => (
+            3306,
+            r#"
+SCHEMA_Q="SELECT TABLE_NAME, TABLE_SCHEMA, IFNULL(TABLE_ROWS, 0), CONCAT(ROUND(IFNULL(DATA_LENGTH + INDEX_LENGTH, 0) / 1024 / 1024, 2), ' MB'), TABLE_TYPE FROM information_schema.tables WHERE TABLE_SCHEMA = COALESCE(NULLIF(DATABASE(), ''), TABLE_SCHEMA) ORDER BY IFNULL(DATA_LENGTH + INDEX_LENGTH, 0) DESC, TABLE_NAME LIMIT 300;"
+__scc_run_mysql_tsv "$SCHEMA_Q"
+"#,
+        ),
+        "redis" => (
+            6379,
+            r#"
+__scc_run_redis "INFO keyspace"
+RC=$?
+[ $RC -ne 0 ] && exit $RC
 echo "===MEMORY==="
-redis-cli $H_ARG -p "$PORT" $A_ARG INFO memory 2>/dev/null | grep "used_memory_human:" || true
-'
-"#
-            )
-        },
-        _ => {
-            // PostgreSQL default
-            let port_num = port.unwrap_or(5432);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-DB="{database}"
+__scc_run_redis "INFO memory" | grep "used_memory_human:" || true
+"#,
+        ),
+        _ => (
+            5432,
+            r#"
+SCHEMA_Q="SELECT t.table_name, t.table_schema, COALESCE(NULLIF(c.reltuples, -1), 0)::bigint, CASE WHEN c.oid IS NOT NULL AND c.relkind IN ('r', 'p', 'm', 't') THEN pg_size_pretty(pg_total_relation_size(c.oid)) ELSE '0 bytes' END, t.table_type FROM information_schema.tables t LEFT JOIN pg_catalog.pg_namespace n ON n.nspname = t.table_schema LEFT JOIN pg_catalog.pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid WHERE t.table_schema NOT IN ('information_schema', 'pg_catalog') AND t.table_schema NOT LIKE 'pg_toast%' ORDER BY (CASE WHEN c.oid IS NOT NULL AND c.relkind IN ('r', 'p', 'm', 't') THEN pg_total_relation_size(c.oid) ELSE 0 END) DESC, t.table_schema, t.table_name LIMIT 300;"
+__scc_run_pg_tsv "$SCHEMA_Q"
+"#,
+        ),
+    };
 
-QUERY="SELECT t.table_name, t.table_schema, COALESCE(c.reltuples, 0)::bigint, pg_size_pretty(pg_total_relation_size(quote_ident(t.table_schema) || '\''.'\'' || quote_ident(t.table_name))), t.table_type FROM information_schema.tables t LEFT JOIN pg_class c ON c.relname = t.table_name WHERE t.table_schema NOT IN ('\''information_schema'\'', '\''pg_catalog'\'') ORDER BY pg_total_relation_size(quote_ident(t.table_schema) || '\''.'\'' || quote_ident(t.table_name)) DESC LIMIT 200;"
+    let script = build_db_script(&creds, default_port, &target_db, "", body);
+    let out_res = exec_bash_script(&mut session, &script, Duration::from_secs(15)).await;
+    drop(session);
 
-run_pg() {{
-    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
-        export PGPASSWORD="$PASS"
-        H_ARG=""
-        [ -n "$HOST" ] && H_ARG="-h $HOST"
-        U_ARG=""
-        [ -n "$USER" ] && U_ARG="-U $USER"
-        psql $H_ARG -p "$PORT" $U_ARG -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null && return 0
-    fi
-    if [ "$(id -u)" -eq 0 ]; then
-        if id -u postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null && return 0
-        fi
-    fi
-    psql -U "${{USER:-postgres}}" -d "$DB" -X -A -F $'\t' -c "$QUERY" 2>/dev/null
-}}
-run_pg
-'
-"#
-            )
+    let out = match out_res {
+        Ok(o) => o,
+        Err(e) => {
+            let safe_err = sanitize_error_text(&e.to_string(), &pass_for_redact);
+            pass_for_redact.zeroize();
+            return Err(CommandError::Internal(safe_err));
         }
     };
 
-    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(15)).await?;
+    if out.exit_status != Some(0) {
+        let err_msg = sanitize_error_text(&strip_noise_lines(&combine_error_output(&out)), &pass_for_redact);
+        pass_for_redact.zeroize();
+        return Err(CommandError::Internal(if err_msg.is_empty() {
+            format!("Failed to load {} tables for '{}'", engine, target_db)
+        } else {
+            err_msg
+        }));
+    }
+
+    pass_for_redact.zeroize();
+
+    let clean_stdout = strip_noise_lines(&out.stdout);
     let mut tables: Vec<DatabaseTableInfo> = Vec::new();
     let mut keyspaces: Option<Vec<String>> = None;
 
     if engine == "redis" {
         let mut ks_vec = Vec::new();
-        for line in out.stdout.lines() {
+        for line in clean_stdout.lines() {
             let trimmed = line.trim();
             if trimmed.starts_with("db") && trimmed.contains(':') {
                 ks_vec.push(trimmed.to_string());
@@ -950,10 +1194,9 @@ run_pg
         }
         keyspaces = Some(ks_vec);
     } else {
-        let lines: Vec<&str> = out.stdout.lines().collect();
-        for line in lines.iter().skip(1) {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('(') {
+        for line in clean_stdout.lines().skip(1) {
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() || (trimmed.starts_with('(') && (trimmed.ends_with("rows)") || trimmed.ends_with("row)"))) {
                 continue;
             }
             let cols: Vec<&str> = trimmed.split('\t').collect();
@@ -978,11 +1221,55 @@ run_pg
     let total_tables = tables.len();
 
     Ok(DatabaseSchemaSummary {
-        database,
+        database: target_db,
         engine,
         tables,
         total_tables,
         keyspaces,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_credentials_debug_redacts_password() {
+        let creds = DatabaseCredentials {
+            host: Some("127.0.0.1".into()),
+            port: Some(5432),
+            user: Some("dbuser".into()),
+            password: Some("super_secret_pw_999".into()),
+        };
+        let dbg = format!("{:?}", creds);
+        assert!(!dbg.contains("super_secret_pw_999"));
+        assert!(dbg.contains("[REDACTED]"));
+        assert!(dbg.contains("dbuser"));
+    }
+
+    #[test]
+    fn test_destructive_query_detection_normalizes_whitespace() {
+        assert!(is_query_destructive("DROP TABLE users;"));
+        assert!(is_query_destructive("  delete\nfrom users where id = 1;"));
+        assert!(is_query_destructive("GRANT ALL ON DATABASE app TO public;"));
+        assert!(is_query_destructive("FLUSHALL"));
+        assert!(!is_query_destructive("SELECT * FROM users WHERE name = 'update';"));
+    }
+
+    #[test]
+    fn test_build_db_script_avoids_bash_c_quote_breakage_and_hides_raw_secrets() {
+        let creds = DatabaseCredentials {
+            host: None,
+            port: Some(5432),
+            user: Some("app_user".into()),
+            password: Some("p'a$s\"w0rd!".into()),
+        };
+        let query = "SELECT 'ok' AS status, E'\\t' AS tab FROM logs WHERE msg <> $$bad$$;";
+        let script = build_db_script(&creds, 5432, "app_db", query, "__scc_run_pg_tsv \"$SCC_QUERY\"");
+        assert!(!script.contains("p'a$s\"w0rd!"));
+        assert!(!script.contains("SELECT 'ok'"));
+        assert!(script.contains("-F $'\\t'"));
+        assert!(script.contains("ORDER_PROTECTED") || script.contains("base64 -d"));
+    }
 }
 

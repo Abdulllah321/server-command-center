@@ -2583,153 +2583,112 @@ pub async fn list_server_databases(
         .or_else(|| options.as_ref().and_then(|o| o.server_id_camel.clone()))
         .ok_or_else(|| CommandError::Validation("server_id is required".into()))?;
 
+    let target_type = options.as_ref()
+        .and_then(|o| o.target_type.as_deref())
+        .unwrap_or("postgres");
+    let user = options.as_ref().and_then(|o| o.db_user.as_deref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let mut pass = options.as_ref().and_then(|o| o.db_password.as_deref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let host = options.as_ref().and_then(|o| o.db_host.as_deref()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let port = options.as_ref().and_then(|o| o.db_port);
+
+    let creds = crate::commands::database::DatabaseCredentials {
+        host,
+        port,
+        user,
+        password: pass.clone(),
+    };
+
     let session_arc = state.session_manager
         .get_or_connect(effective_server_id.clone(), state.db.clone(), app_handle.clone())
         .await?;
     let mut session = session_arc.lock().await;
 
-    let target_type = options.as_ref()
-        .and_then(|o| o.target_type.as_deref())
-        .unwrap_or("postgres");
-    let user = options.as_ref().and_then(|o| o.db_user.as_deref()).unwrap_or("").trim();
-    let pass = options.as_ref().and_then(|o| o.db_password.as_deref()).unwrap_or("").trim();
-    let host = options.as_ref().and_then(|o| o.db_host.as_deref()).unwrap_or("").trim();
-    let port = options.as_ref().and_then(|o| o.db_port);
+    let (default_port, body) = match target_type {
+        "mysql" => (
+            3306,
+            r#"__scc_run_mysql_tsv "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('information_schema', 'performance_schema', 'mysql', 'sys') ORDER BY schema_name;""#,
+        ),
+        "redis" => (
+            6379,
+            r#"__scc_run_redis "INFO keyspace""#,
+        ),
+        _ => (
+            5432,
+            r#"__scc_run_pg_tsv "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;""#,
+        ),
+    };
 
-    let script = match target_type {
-        "mysql" => {
-            let port_num = port.unwrap_or(3306);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
+    let script = crate::commands::database::build_db_script(&creds, default_port, "", "", body);
+    let out_res = crate::commands::database::exec_bash_script(&mut session, &script, Duration::from_secs(15)).await;
+    drop(session);
 
-run_query() {{
-    if [ -n "$PASS" ]; then
-        MYSQL_PWD="$PASS" mysql -u "${{USER:-root}}" ${{HOST:+-h "$HOST"}} -P "$PORT" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
-    fi
-
-    if [ -f /etc/mysql/debian.cnf ]; then
-        mysql --defaults-file=/etc/mysql/debian.cnf -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        if sudo mysql -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_MYSQL=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "mysql|mariadb" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_MYSQL" ]; then
-            docker exec "$DOCKER_MYSQL" mysql -u "${{USER:-root}}" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null && return 0
-        fi
-    fi
-
-    mysql -u "${{USER:-root}}" -N -B -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('\''information_schema'\'', '\''performance_schema'\'', '\''mysql'\'', '\''sys'\'') ORDER BY schema_name;" 2>/dev/null || true
-}}
-
-run_query
-'
-"#
-            )
-        },
-        "redis" => {
-            format!(
-                r#"bash -c '
-run_query() {{
-    if command -v redis-cli >/dev/null 2>&1; then
-        redis-cli INFO keyspace 2>/dev/null | grep -E "^db[0-9]+" | cut -d: -f1 || true
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_REDIS=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "redis" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_REDIS" ]; then
-            docker exec "$DOCKER_REDIS" redis-cli INFO keyspace 2>/dev/null | grep -E "^db[0-9]+" | cut -d: -f1 || true
-        fi
-    fi
-}}
-
-run_query
-'
-"#
-            )
-        },
-        _ => {
-            let port_num = port.unwrap_or(5432);
-            format!(
-                r#"bash -c '
-USER="{user}"
-PASS="{pass}"
-HOST="{host}"
-PORT="{port_num}"
-
-run_query() {{
-    if [ -n "$PASS" ] || [ -n "$HOST" ]; then
-        export PGPASSWORD="$PASS"
-        H_ARG=""
-        [ -n "$HOST" ] && H_ARG="-h $HOST"
-        U_ARG=""
-        [ -n "$USER" ] && U_ARG="-U $USER"
-        psql $H_ARG -p "$PORT" $U_ARG -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
-    fi
-
-    if [ -n "$USER" ]; then
-        if [ "$(id -u)" -eq 0 ] && id -u "$USER" >/dev/null 2>&1; then
-            sudo -u "$USER" psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
-        elif psql -U "$USER" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    if [ "$(id -u)" -eq 0 ]; then
-        if id -u postgres >/dev/null 2>&1; then
-            sudo -u postgres psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
-        elif su - postgres -c "psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;\"" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    if psql -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null; then
-        return 0
-    fi
-
-    if command -v docker >/dev/null 2>&1; then
-        DOCKER_PG=$(docker ps --format "{{{{.Names}}}} {{{{.Image}}}}" 2>/dev/null | grep -iE "postgres|timescale" | awk "{{print \$1}}" | head -n 1)
-        if [ -n "$DOCKER_PG" ]; then
-            U_NAME="${{USER:-postgres}}"
-            docker exec "$DOCKER_PG" psql -U "$U_NAME" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null && return 0
-        fi
-    fi
-
-    psql -U "${{USER:-postgres}}" -t -A -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null || true
-}}
-
-run_query
-'
-"#
-            )
+    let out = match out_res {
+        Ok(o) => o,
+        Err(e) => {
+            let mut err_str = crate::secrets::redact::redact_secrets(&e.to_string());
+            if let Some(ref mut p) = pass {
+                if !p.is_empty() {
+                    err_str = err_str.replace(p.as_str(), "***REDACTED***");
+                }
+                zeroize::Zeroize::zeroize(p);
+            }
+            return Err(CommandError::Internal(err_str));
         }
     };
 
-    let out = exec_ssh_command_full(&mut session, &script, Duration::from_secs(15)).await?;
-    let mut dbs: Vec<String> = Vec::new();
+    if out.exit_status != Some(0) {
+        let mut raw_err = if !out.stderr.trim().is_empty() { out.stderr } else { out.stdout };
+        raw_err = crate::secrets::redact::redact_secrets(&raw_err);
+        if let Some(ref mut p) = pass {
+            if !p.is_empty() {
+                raw_err = raw_err.replace(p.as_str(), "***REDACTED***");
+            }
+            zeroize::Zeroize::zeroize(p);
+        }
+        let msg = raw_err
+            .lines()
+            .filter(|l| !l.trim().starts_with("could not change directory to "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(CommandError::Internal(if msg.trim().is_empty() {
+            format!("Failed to list {} databases on server", target_type)
+        } else {
+            msg.trim().to_string()
+        }));
+    }
 
+    if let Some(ref mut p) = pass {
+        zeroize::Zeroize::zeroize(p);
+    }
+
+    let mut dbs: Vec<String> = Vec::new();
+    let mut first_data_line = true;
     for line in out.stdout.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed.starts_with("could not change directory to ") {
+            continue;
+        }
+        if target_type == "redis" {
+            if let Some(db_key) = trimmed.split(':').next() {
+                if db_key.starts_with("db") && db_key[2..].chars().all(|c| c.is_ascii_digit()) {
+                    if !dbs.contains(&db_key.to_string()) {
+                        dbs.push(db_key.to_string());
+                    }
+                }
+            }
             continue;
         }
         let lower = trimmed.to_lowercase();
-        if lower.starts_with("error:")
+        if first_data_line {
+            first_data_line = false;
+            if lower == "datname" || lower == "schema_name" || lower == "database" {
+                continue;
+            }
+        }
+        if (trimmed.starts_with('(') && (trimmed.ends_with("rows)") || trimmed.ends_with("row)")))
+            || lower.starts_with("error:")
             || lower.starts_with("fatal:")
             || lower.starts_with("warning:")
-            || lower.contains("permission denied")
-            || lower.contains("could not connect")
-            || lower.contains("command not found")
-            || lower.contains("password authentication failed")
         {
             continue;
         }
@@ -2738,10 +2697,8 @@ run_query
         }
     }
 
-    if target_type == "redis" {
-        if !dbs.contains(&"dump.rdb".to_string()) {
-            dbs.insert(0, "dump.rdb".to_string());
-        }
+    if target_type == "redis" && !dbs.contains(&"dump.rdb".to_string()) {
+        dbs.insert(0, "dump.rdb".to_string());
     }
 
     Ok(dbs)
