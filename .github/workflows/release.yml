@@ -37,7 +37,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          work-dir: ./src-tauri
+          workspaces: ./src-tauri
 
       - name: Install Node Dependencies
         run: npm ci
